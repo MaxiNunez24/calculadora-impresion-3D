@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Calculadora de impresión 3D</title>
   <meta name="description" content="Costos, presupuestos y catálogo de colores para impresión 3D">
-  <link rel="stylesheet" href="styles.css?v=7">
+  <link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body class="bloqueado">
   <!-- Pantalla de ingreso: la contraseña es el token del Worker, que es lo que protege los datos -->
@@ -59,17 +59,15 @@
           <label>Color
             <select id="color"></select>
           </label>
-          <label>Cantidad
-            <input id="cantidad" type="number" min="1" step="1" value="1" inputmode="numeric">
-          </label>
-          <label>Peso y tiempo de…
-            <select id="modoCarga">
-              <option value="tanda">Toda la tanda</option>
-              <option value="unidad">Una unidad</option>
-            </select>
-          </label>
+        </div>
+
+        <h2 class="sub" id="tituloPieza">Cada pieza</h2>
+        <div class="campos">
           <label>Peso (g)
             <input id="gramos" type="number" min="0" step="0.1" value="0" inputmode="decimal">
+          </label>
+          <label>Insumos ($)
+            <input id="otros" type="number" min="0" step="1" value="0" inputmode="decimal">
           </label>
           <label>Horas de impresión
             <input id="horas" type="number" min="0" step="1" value="0" inputmode="numeric">
@@ -78,24 +76,32 @@
             <input id="minutos" type="number" min="0" max="59" step="1" value="0" inputmode="numeric">
           </label>
           <small class="ancho ayuda" id="ayudaCarga"></small>
-          <label>Horas de diseño
-            <input id="horasDiseno" type="number" min="0" step="0.25" value="0" inputmode="decimal">
-          </label>
-          <label>Otros insumos ($)
-            <input id="otros" type="number" min="0" step="1" value="0" inputmode="decimal">
-          </label>
           <label class="check ancho">
-            <input id="bonificarDiseno" type="checkbox">
-            Bonificar el diseño <small>Aparece en el presupuesto como regalo, pero no se cobra.</small>
+            <input id="esTanda" type="checkbox">
+            Son datos de la tanda completa <small>Marcalo si laminaste todas las copias juntas en PrusaSlicer y cargás el peso y el tiempo total.</small>
           </label>
         </div>
 
-        <h2 class="sub">Precio</h2>
+        <h2 class="sub">Diseño</h2>
         <div class="campos">
-          <label>Precio por unidad ($)
+          <label>Horas de diseño
+            <input id="horasDiseno" type="number" min="0" step="0.25" value="0" inputmode="decimal">
+          </label>
+          <label class="check">
+            <input id="bonificarDiseno" type="checkbox">
+            Bonificarlo <small>Aparece como regalo, pero no se cobra.</small>
+          </label>
+        </div>
+
+        <h2 class="sub">Cantidad y precio</h2>
+        <div class="campos">
+          <label class="ancho">Cantidad
+            <input id="cantidad" type="number" min="1" step="1" value="1" inputmode="numeric">
+          </label>
+          <label>Tu precio por unidad ($)
             <input id="precioManual" type="number" min="0" step="10" inputmode="decimal">
             <small id="ayudaPrecio"></small>
-            <button type="button" id="restablecerPrecio" class="link" hidden>↺ Usar el sugerido</button>
+            <button type="button" id="restablecerPrecio" class="link" hidden>↺ Usar el mínimo recomendado</button>
           </label>
           <label>Descuento sobre el total (%)
             <input id="descuento" type="number" min="0" max="100" step="1" inputmode="decimal">
@@ -346,6 +352,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

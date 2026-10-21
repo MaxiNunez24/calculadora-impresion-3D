@@ -363,7 +363,7 @@ function calcular(cfg, t) {
   const amortizacion = cfg.vidaUtilHoras > 0 ? (horas * cfg.valorImpresora) / cfg.vidaUtilHoras : 0;
   const mantenimiento = horas * cfg.mantenimientoHora;
   const fallas = (material + electricidad + amortizacion + mantenimiento) * cfg.fallasPct / 100;
-  const otros = t.otros;
+  const otros = t.otros * factor;
   const diseno = t.horasDiseno * cfg.tarifaDisenoHora;
   const disenoCobrado = t.bonificarDiseno ? 0 : diseno;
 
@@ -402,7 +402,7 @@ function calcular(cfg, t) {
       { nombre: 'Amortización impresora', valor: amortizacion, detalle: `${money.format(cfg.valorImpresora)} ÷ ${cfg.vidaUtilHoras} h de vida útil = ${money.format(cfg.valorImpresora / (cfg.vidaUtilHoras || 1))}/h × ${hs} h`, fija: true },
       { nombre: 'Mantenimiento', valor: mantenimiento, detalle: `${money.format(cfg.mantenimientoHora)}/h × ${hs} h` },
       { nombre: 'Margen por fallas', valor: fallas, detalle: `${cfg.fallasPct}% de material + electricidad + amortización + mantenimiento` },
-      { nombre: 'Otros insumos', valor: otros, detalle: 'Argollas, imanes, packaging…' },
+      { nombre: 'Insumos', valor: otros, detalle: t.porUnidad && cantidad > 1 ? `${money.format(t.otros)} × ${cantidad} u. (argollas, imanes, packaging…)` : 'Argollas, imanes, packaging…' },
       { nombre: 'Diseño (tu tiempo)', valor: diseno, detalle: `${dec(t.horasDiseno)} h × ${money.format(cfg.tarifaDisenoHora)}/h${t.bonificarDiseno ? ' · bonificado: no se cobra' : ''}` },
     ],
     pasos: [
@@ -413,8 +413,8 @@ function calcular(cfg, t) {
         nombre: 'Precio por unidad',
         valor: listaUnidad,
         detalle: t.precioManual != null
-          ? `Ajustado a mano. El sugerido es ${money.format(sugeridoUnidad)} (${money.format(precioProduccion)} ÷ ${cantidad})`
-          : `${money.format(precioProduccion)} ÷ ${cantidad} u. = ${money.format(precioProduccion / cantidad)}${cfg.redondeo > 0 ? `, redondeado hacia arriba a múltiplos de ${money.format(cfg.redondeo)}` : ''}`,
+          ? `Tu precio. El mínimo recomendado (costo + ${cfg.gananciaPct}%) es ${money.format(sugeridoUnidad)}`
+          : `Mínimo recomendado: ${money.format(precioProduccion)} ÷ ${cantidad} u. = ${money.format(precioProduccion / cantidad)}${cfg.redondeo > 0 ? `, redondeado hacia arriba a múltiplos de ${money.format(cfg.redondeo)}` : ''}`,
         clase: t.precioManual != null ? 'manual' : '',
       },
       { nombre: `Piezas (${cantidad} × ${money.format(listaUnidad)})`, valor: subtotalPiezas, detalle: '' },
@@ -460,7 +460,7 @@ function leerTrabajo() {
     filamentoId: $('#filamento').value,
     color: $('#color').value,
     cantidad: num($('#cantidad').value),
-    porUnidad: $('#modoCarga').value === 'unidad',
+    porUnidad: !$('#esTanda').checked,
     gramos: num($('#gramos').value),
     horas: num($('#horas').value),
     minutos: num($('#minutos').value),
@@ -486,7 +486,8 @@ function cargarTrabajo(t) {
     if (el.type === 'checkbox') el.checked = Boolean(t[campo]);
     else el.value = t[campo] ?? '';
   }
-  $('#modoCarga').value = t.porUnidad ? 'unidad' : 'tanda';
+  // Las evaluaciones viejas no tienen porUnidad: eran siempre de la tanda completa
+  $('#esTanda').checked = !t.porUnidad;
   marcarManual($('#precioManual'), t.precioManual != null);
   marcarManual($('#descuento'), t.descuento != null);
   $('#filamento').value = t.filamentoId;
@@ -533,9 +534,10 @@ function renderResultado() {
 
   const totalHoras = Math.floor(r.horas);
   const totalMin = Math.round((r.horas - totalHoras) * 60);
+  $('#tituloPieza').textContent = t.porUnidad ? 'Cada pieza' : 'Toda la tanda';
   $('#ayudaCarga').textContent = t.porUnidad
-    ? `Se multiplica por ${r.cantidad}: ${dec(r.gramos)} g y ${totalHoras} h ${totalMin} min en total.`
-    : 'Peso y tiempo de todas las unidades juntas, como los muestra PrusaSlicer con la cama completa.';
+    ? (r.cantidad > 1 ? `× ${r.cantidad} unidades = ${dec(r.gramos)} g y ${totalHoras} h ${totalMin} min de impresión en total.` : 'Datos de una pieza: se multiplican por la cantidad de abajo.')
+    : 'Peso, tiempo e insumos de todas las unidades juntas.';
 
   // Paso a paso del precio
   $('#pasosPrecio').replaceChildren(...r.pasos.map((p) => {
@@ -560,8 +562,8 @@ function renderResultado() {
   if (!inputPrecio.dataset.manual) inputPrecio.value = r.sugeridoUnidad;
   if (!inputDescuento.dataset.manual) inputDescuento.value = r.descuentoSugerido;
   $('#ayudaPrecio').textContent = inputPrecio.dataset.manual
-    ? `Editado a mano. Sugerido: ${money.format(r.sugeridoUnidad)}.`
-    : 'Calculado: costo + ganancia ÷ cantidad.';
+    ? `Mínimo recomendado: ${money.format(r.sugeridoUnidad)} (costo + ${config.gananciaPct}%).`
+    : `Es el mínimo recomendado (costo + ${config.gananciaPct}%). Escribí tu precio de venta si es mayor.`;
   $('#ayudaDescuento').textContent = inputDescuento.dataset.manual
     ? `Editado a mano. Escala: ${r.descuentoSugerido}%.`
     : `Según la escala mayorista (${r.cantidad} u.).`;
@@ -569,13 +571,18 @@ function renderResultado() {
   $('#restablecerDescuento').hidden = !inputDescuento.dataset.manual;
 
   const aviso = $('#aviso');
-  aviso.hidden = r.ganancia >= 0 || r.total === 0;
-  if (r.ganancia < 0) {
-    const sinDiseno = r.total - r.produccion;
-    aviso.textContent = sinDiseno >= 0
-      ? `Cubrís los costos de producción, pero no tu hora de diseño (te faltan ${money.format(-r.ganancia)}). Vale la pena si esperás un pedido más grande.`
-      : `Estás cobrando por debajo del costo de producción: perdés ${money.format(-sinDiseno)} sin contar el diseño.`;
+  const avisos = [];
+  if (t.precioManual != null && t.precioManual < r.sugeridoUnidad) {
+    avisos.push(`Tu precio por unidad está por debajo del mínimo recomendado (${money.format(r.sugeridoUnidad)}).`);
   }
+  if (r.ganancia < 0 && r.total > 0) {
+    const sinDiseno = r.total - r.produccion;
+    avisos.push(sinDiseno >= 0
+      ? `Cubrís los costos de producción, pero no tu hora de diseño (te faltan ${money.format(-r.ganancia)}). Vale la pena si esperás un pedido más grande.`
+      : `Estás cobrando por debajo del costo de producción: perdés ${money.format(-sinDiseno)} sin contar el diseño.`);
+  }
+  aviso.hidden = !avisos.length;
+  aviso.textContent = avisos.join(' ');
 
   renderPresupuesto(t, r);
 }

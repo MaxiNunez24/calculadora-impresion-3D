@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calculadora de impresión 3D</title>
+  <meta name="description" content="Costos, presupuestos y catálogo de colores para impresión 3D">
+  <link rel="stylesheet" href="styles.css?v=3">
+</head>
+<body>
+  <header class="app-header no-print">
+    <div class="marca">
+      <h1>Calculadora 3D</h1>
+      <p class="subtitle">Prusa MK3S+ · OctoPrint <span id="estadoNube" class="estado-nube" hidden></span></p>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="calcular" role="tab">Calcular</button>
+      <button class="tab" data-tab="catalogo" role="tab">Catálogo</button>
+      <button class="tab" data-tab="historial" role="tab">Historial</button>
+      <button class="tab" data-tab="config" role="tab">Configuración</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ============ CALCULAR ============ -->
+    <section id="calcular" class="panel calc-grid active">
+      <form id="trabajo" class="card no-print" autocomplete="off">
+        <h2>Trabajo</h2>
+        <div class="campos">
+          <label class="ancho">Cliente
+            <input id="nombre" type="text" placeholder="Ej: Ferretería López">
+          </label>
+          <label class="ancho">Concepto
+            <input id="concepto" type="text" placeholder="Ej: Llavero personalizado con nombre y teléfono">
+          </label>
+          <label>Filamento
+            <select id="filamento"></select>
+          </label>
+          <label>Color
+            <select id="color"></select>
+          </label>
+          <label>Cantidad
+            <input id="cantidad" type="number" min="1" step="1" value="1" inputmode="numeric">
+          </label>
+          <label>Peso total (g)
+            <input id="gramos" type="number" min="0" step="0.1" value="0" inputmode="decimal">
+          </label>
+          <label>Horas de impresión
+            <input id="horas" type="number" min="0" step="1" value="0" inputmode="numeric">
+          </label>
+          <label>Minutos
+            <input id="minutos" type="number" min="0" max="59" step="1" value="0" inputmode="numeric">
+          </label>
+          <small class="ancho ayuda">Peso y tiempo de toda la tanda, como los muestra PrusaSlicer.</small>
+          <label>Horas de diseño
+            <input id="horasDiseno" type="number" min="0" step="0.25" value="0" inputmode="decimal">
+          </label>
+          <label>Otros insumos ($)
+            <input id="otros" type="number" min="0" step="1" value="0" inputmode="decimal">
+          </label>
+          <label class="check ancho">
+            <input id="bonificarDiseno" type="checkbox">
+            Bonificar el diseño <small>Aparece en el presupuesto como regalo, pero no se cobra.</small>
+          </label>
+        </div>
+
+        <h2 class="sub">Precio</h2>
+        <div class="campos">
+          <label>Precio de lista por unidad ($)
+            <input id="precioManual" type="number" min="0" step="10" inputmode="decimal">
+          </label>
+          <label>Descuento por cantidad (%)
+            <input id="descuento" type="number" min="0" max="100" step="1" inputmode="decimal">
+          </label>
+          <small class="ancho ayuda">Vacíos = precio sugerido y escala mayorista de Configuración.</small>
+          <label class="ancho">Notas para el cliente
+            <textarea id="notas" rows="2" placeholder="Ej: Incluye argolla metálica. Entrega en 5 días hábiles."></textarea>
+          </label>
+        </div>
+        <div class="acciones">
+          <button type="button" id="guardar" class="btn">Guardar en historial</button>
+          <button type="reset" class="btn secondary">Limpiar</button>
+        </div>
+      </form>
+
+      <div class="card resultado no-print">
+        <h2>Costos</h2>
+        <ul id="desglose" class="desglose"></ul>
+        <dl id="costos" class="totales"></dl>
+        <h2 class="sub">Precio</h2>
+        <dl id="precios" class="totales"></dl>
+        <p id="aviso" class="aviso" hidden></p>
+        <p class="nota">Tu hora de diseño cuenta como costo aunque la bonifiques: así ves la ganancia real.</p>
+      </div>
+
+      <div class="card col-presupuesto">
+        <div class="barra-titulo no-print">
+          <h2>Presupuesto</h2>
+          <div class="acciones">
+            <button class="btn small" data-exportar-pdf="presupuesto">PDF</button>
+            <button class="btn small secondary" data-exportar-jpg="presupuesto">JPG</button>
+          </div>
+        </div>
+        <div class="papel-scroll">
+          <article id="presupuesto" class="papel">
+            <header class="papel-header">
+              <div>
+                <h1 class="pNegocio">Impresión 3D</h1>
+                <p class="pContacto"></p>
+              </div>
+              <div class="papel-meta">
+                <strong>PRESUPUESTO</strong>
+                <span id="pFecha"></span>
+              </div>
+            </header>
+            <p class="papel-cliente" id="pCliente"></p>
+            <table class="papel-tabla">
+              <thead>
+                <tr><th>Concepto</th><th>Cant.</th><th>P. unit.</th><th>Subtotal</th></tr>
+              </thead>
+              <tbody id="pItems"></tbody>
+              <tfoot>
+                <tr><th colspan="3">Total</th><td id="pTotal"></td></tr>
+              </tfoot>
+            </table>
+            <div id="pColores" class="papel-colores"></div>
+            <p id="pNotas" class="papel-texto"></p>
+            <p id="pValidez" class="papel-pie"></p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CATÁLOGO ============ -->
+    <section id="catalogo" class="panel no-print-panel">
+      <div class="card no-print">
+        <h2>Colores por filamento</h2>
+        <p class="nota">Cargá los colores que tenés en stock. Se usan en el selector de color, en el presupuesto y en el catálogo para clientes.</p>
+        <div id="editorColores" class="editor-colores"></div>
+      </div>
+      <div class="card">
+        <div class="barra-titulo no-print">
+          <h2>Catálogo para clientes</h2>
+          <div class="acciones">
+            <button class="btn small" data-exportar-pdf="catalogoPapel">PDF</button>
+            <button class="btn small secondary" data-exportar-jpg="catalogoPapel">JPG</button>
+          </div>
+        </div>
+        <div class="papel-scroll">
+          <article id="catalogoPapel" class="papel">
+            <header class="papel-header">
+              <div>
+                <h1 class="pNegocio">Impresión 3D</h1>
+                <p class="pContacto"></p>
+              </div>
+              <div class="papel-meta">
+                <strong>COLORES</strong>
+                <span>Disponibles hoy</span>
+              </div>
+            </header>
+            <div id="catalogoContenido"></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ HISTORIAL ============ -->
+    <section id="historial" class="panel no-print">
+      <div class="card">
+        <div class="barra-titulo">
+          <h2>Evaluaciones guardadas</h2>
+          <button id="exportarCsv" class="btn small secondary">Exportar CSV</button>
+        </div>
+        <p class="nota" id="notaHistorial"></p>
+        <ul id="listaHistorial" class="historial"></ul>
+      </div>
+    </section>
+
+    <!-- ============ CONFIGURACIÓN ============ -->
+    <section id="config" class="panel config-grid no-print">
+      <div class="card">
+        <h2>Tu negocio</h2>
+        <label>Nombre del emprendimiento
+          <input data-config="nombreNegocio" type="text" placeholder="Aparece en el presupuesto">
+        </label>
+        <label>Contacto
+          <input data-config="contacto" type="text" placeholder="WhatsApp, Instagram, mail…">
+        </label>
+        <label>Validez del presupuesto (días)
+          <input data-config="validezDias" type="number" min="0" step="1">
+        </label>
+      </div>
+
+      <div class="card">
+        <h2>Impresora</h2>
+        <label>Valor de la impresora ($)
+          <input data-config="valorImpresora" type="number" min="0" step="1000">
+          <small>Lo que pagaste o lo que costaría reemplazarla hoy.</small>
+        </label>
+        <label>Vida útil estimada (horas)
+          <input data-config="vidaUtilHoras" type="number" min="1" step="100">
+        </label>
+        <label>Mantenimiento ($ por hora)
+          <input data-config="mantenimientoHora" type="number" min="0" step="1">
+          <small>Picos, lámina PEI, correas, lubricante.</small>
+        </label>
+        <label>Consumo Raspberry Pi / OctoPrint (W)
+          <input data-config="consumoRaspberryW" type="number" min="0" step="0.5">
+        </label>
+      </div>
+
+      <div class="card">
+        <h2>Electricidad y mano de obra</h2>
+        <label>Tarifa eléctrica ($ por kWh, con impuestos)
+          <input data-config="tarifaKwh" type="number" min="0" step="1">
+        </label>
+        <label>Tarifa de diseño ($ por hora)
+          <input data-config="tarifaDisenoHora" type="number" min="0" step="100">
+        </label>
+      </div>
+
+      <div class="card">
+        <h2>Márgenes</h2>
+        <label>Margen por fallas (%)
+          <input data-config="fallasPct" type="number" min="0" step="1">
+        </label>
+        <label>Ganancia (%)
+          <input data-config="gananciaPct" type="number" min="0" step="1">
+        </label>
+        <label>Redondear precios a múltiplos de ($)
+          <input data-config="redondeo" type="number" min="0" step="10">
+        </label>
+      </div>
+
+      <div class="card">
+        <h2>Escala mayorista</h2>
+        <table class="editable">
+          <thead><tr><th>Desde (u.)</th><th>Descuento (%)</th><th></th></tr></thead>
+          <tbody id="escalasBody"></tbody>
+        </table>
+        <small>Se aplica el escalón más alto que alcance la cantidad.</small>
+        <div class="acciones">
+          <button id="agregarEscala" class="btn small secondary">+ Agregar escalón</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Sincronización</h2>
+        <p class="nota">Con tu Worker de Cloudflare, la configuración y el historial se comparten entre la PC y el celular, y los precios se traen de PrintALot.</p>
+        <label>URL del Worker
+          <input id="apiUrl" type="url" placeholder="https://calculadora-3d-api.tu-usuario.workers.dev">
+        </label>
+        <label>Token
+          <input id="apiToken" type="password" autocomplete="off" placeholder="El mismo que cargaste con wrangler secret">
+          <small>Queda guardado solo en este dispositivo.</small>
+        </label>
+        <div class="acciones">
+          <button id="conectar" class="btn small">Conectar</button>
+          <button id="desconectar" class="btn small secondary">Desconectar</button>
+        </div>
+        <p id="estadoConexion" class="estado"></p>
+      </div>
+
+      <div class="card ancho-total">
+        <div class="barra-titulo">
+          <h2>Filamentos</h2>
+          <button id="actualizarPrecios" class="btn small secondary">Actualizar precios de PrintALot</button>
+        </div>
+        <p id="estadoPrecios" class="estado"></p>
+        <div class="tabla-scroll">
+          <table class="editable filamentos">
+            <thead>
+              <tr><th>Nombre</th><th>Producto PrintALot</th><th>Precio rollo ($)</th><th>Peso rollo (g)</th><th>Consumo (W)</th><th></th></tr>
+            </thead>
+            <tbody id="filamentosBody"></tbody>
+          </table>
+        </div>
+        <small>Con un producto vinculado, el precio se actualiza solo. Consumo según la cama: PLA ≈ 80 W, PETG ≈ 120 W.</small>
+        <div class="acciones">
+          <button id="agregarFilamento" class="btn small secondary">+ Agregar filamento</button>
+          <button id="restaurar" class="btn small danger">Restaurar valores por defecto</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js?v=3"></script>
+</body>
+</html>

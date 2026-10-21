@@ -1,0 +1,914 @@
+'use strict';
+
+const STORAGE_KEY = 'calc3d.config.v1';
+const HISTORIAL_KEY = 'calc3d.historial.v1';
+const CONEXION_KEY = 'calc3d.conexion.v1';
+const PRECIOS_KEY = 'calc3d.precios.v1';
+const HTML2CANVAS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+
+const COLORES_CONOCIDOS = {
+  negro: '#1c1c1c', blanco: '#f5f5f5', gris: '#8a8f98', rojo: '#d32f2f', azul: '#1e5bd8', celeste: '#4fc3f7',
+  verde: '#2e9d4a', amarillo: '#f7d117', naranja: '#f57c00', violeta: '#7b3fb5', lila: '#b39ddb', rosa: '#f06292',
+  marrón: '#795548', marron: '#795548', dorado: '#c9a227', oro: '#c9a227', plateado: '#c0c0c0', plata: '#c0c0c0',
+  cobre: '#b87333', transparente: '#e8f4f4', natural: '#efe8d8', piel: '#f1c8a5', bordo: '#7b1f2e',
+};
+
+const DEFAULTS = {
+  version: 3,
+  actualizado: null,
+  nombreNegocio: '',
+  contacto: '',
+  validezDias: 7,
+  valorImpresora: 500000,
+  vidaUtilHoras: 5000,
+  mantenimientoHora: 15,
+  consumoRaspberryW: 5,
+  tarifaKwh: 200,
+  tarifaDisenoHora: 5000,
+  fallasPct: 10,
+  gananciaPct: 30,
+  redondeo: 100,
+  escalas: [
+    { desde: 10, descuento: 10 },
+    { desde: 25, descuento: 15 },
+    { desde: 50, descuento: 20 },
+  ],
+  // printalotId: producto de printalot.com.ar del que se toma el precio
+  filamentos: [
+    { id: 'pla', nombre: 'PLA', printalotId: 37272, precioRollo: 21000, pesoRollo: 1000, consumoW: 80, colores: [] },
+    { id: 'petg', nombre: 'PETG', printalotId: 37241, precioRollo: 21000, pesoRollo: 1000, consumoW: 120, colores: [] },
+    { id: 'silk', nombre: 'PLA Silk', printalotId: 37325, precioRollo: 21000, pesoRollo: 1000, consumoW: 80, colores: [] },
+    { id: 'flex', nombre: 'PLA Flex', printalotId: 37328, precioRollo: 21000, pesoRollo: 1000, consumoW: 85, colores: [] },
+  ],
+};
+
+const $ = (sel) => document.querySelector(sel);
+const money = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
+const num = (v) => (Number.isFinite(+v) ? +v : 0);
+const numOrNull = (v) => (v === '' || !Number.isFinite(+v) ? null : +v);
+const fechaHora = (iso) => new Date(iso).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
+
+function leerJson(clave, porDefecto) {
+  try { return JSON.parse(localStorage.getItem(clave)) ?? porDefecto; } catch { return porDefecto; }
+}
+function escribirJson(clave, valor) {
+  try { localStorage.setItem(clave, JSON.stringify(valor)); return true; } catch { return false; }
+}
+
+function hexDeNombre(nombre) {
+  const n = nombre.trim().toLowerCase();
+  for (const [clave, hex] of Object.entries(COLORES_CONOCIDOS)) if (n.includes(clave)) return hex;
+  return '#9e9e9e';
+}
+
+// ---------- Configuración ----------
+function migrarConfig(saved) {
+  const cfg = { ...structuredClone(DEFAULTS), ...structuredClone(saved) };
+  if ((saved.version || 1) < 2) {
+    // v1 solo tenía PLA
+    for (const f of DEFAULTS.filamentos) {
+      if (!cfg.filamentos.some((x) => x.id === f.id)) cfg.filamentos.push(structuredClone(f));
+    }
+  }
+  for (const f of cfg.filamentos) {
+    // v2 guardaba los colores como texto separado por comas
+    if (typeof f.colores === 'string') {
+      f.colores = f.colores.split(',').map((s) => s.trim()).filter(Boolean).map((nombre) => ({ nombre, hex: hexDeNombre(nombre) }));
+    }
+    f.colores ??= [];
+    if (f.printalotId === undefined) f.printalotId = DEFAULTS.filamentos.find((d) => d.id === f.id)?.printalotId ?? null;
+  }
+  cfg.version = DEFAULTS.version;
+  return cfg;
+}
+
+function loadConfig() {
+  const saved = leerJson(STORAGE_KEY, null);
+  if (saved && Array.isArray(saved.filamentos) && saved.filamentos.length) return migrarConfig(saved);
+  return structuredClone(DEFAULTS);
+}
+
+function saveConfig({ marcar = true } = {}) {
+  if (marcar) config.actualizado = new Date().toISOString();
+  escribirJson(STORAGE_KEY, config);
+  if (marcar) programarSubidaConfig();
+}
+
+let config = loadConfig();
+
+// ---------- Nube (Cloudflare Worker) ----------
+let conexion = leerJson(CONEXION_KEY, { apiUrl: '', apiToken: '' });
+const conectado = () => Boolean(conexion.apiUrl && conexion.apiToken);
+
+async function api(metodo, ruta, cuerpo) {
+  const resp = await fetch(conexion.apiUrl.replace(/\/+$/, '') + ruta, {
+    method: metodo,
+    headers: {
+      Authorization: `Bearer ${conexion.apiToken}`,
+      ...(cuerpo ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: cuerpo ? JSON.stringify(cuerpo) : undefined,
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || `Error ${resp.status}`);
+  return datos;
+}
+
+function marcarNube(estado, detalle = '') {
+  const el = $('#estadoNube');
+  el.hidden = !estado;
+  el.textContent = estado === 'ok' ? '· ☁ sincronizado' : '· ⚠ sin conexión';
+  el.title = detalle;
+}
+
+function estadoConexion(texto, tipo = '') {
+  const el = $('#estadoConexion');
+  el.textContent = texto;
+  el.className = `estado ${tipo}`;
+}
+
+let timerSubida;
+function programarSubidaConfig() {
+  if (!conectado()) return;
+  clearTimeout(timerSubida);
+  timerSubida = setTimeout(async () => {
+    try {
+      await api('PUT', '/config', { datos: config, actualizado: config.actualizado });
+      marcarNube('ok');
+    } catch (e) {
+      marcarNube('error', e.message);
+    }
+  }, 1500);
+}
+
+async function sincronizarInicio() {
+  if (!conectado()) return;
+  try {
+    const remoto = await api('GET', '/config');
+    if (remoto.datos && (!config.actualizado || remoto.actualizado > config.actualizado)) {
+      config = migrarConfig(remoto.datos);
+      config.actualizado = remoto.actualizado;
+      saveConfig({ marcar: false });
+      renderTodo();
+    } else if (config.actualizado && config.actualizado !== remoto.actualizado) {
+      await api('PUT', '/config', { datos: config, actualizado: config.actualizado });
+    }
+    recibirPrecios(await api('GET', '/precios'));
+    marcarNube('ok');
+    estadoConexion('Conectado ✓', 'ok');
+  } catch (e) {
+    marcarNube('error', e.message);
+    estadoConexion(`Sin conexión con el Worker: ${e.message}`, 'error');
+  } finally {
+    renderHistorial();
+  }
+}
+
+// ---------- Precios de PrintALot ----------
+let precios = leerJson(PRECIOS_KEY, { actualizado: null, productos: [] });
+
+function aplicarPrecios() {
+  let cambiados = 0;
+  for (const f of config.filamentos) {
+    const p = precios.productos.find((x) => x.id === f.printalotId);
+    if (p && (f.precioRollo !== p.precio || f.pesoRollo !== p.pesoG)) {
+      f.precioRollo = p.precio;
+      f.pesoRollo = p.pesoG;
+      cambiados++;
+    }
+  }
+  if (cambiados) saveConfig();
+  return cambiados;
+}
+
+function recibirPrecios(datos, mensajeExtra = '') {
+  precios = { actualizado: datos.actualizado, productos: datos.productos || [] };
+  escribirJson(PRECIOS_KEY, precios);
+  const cambiados = aplicarPrecios();
+  renderEstadoPrecios(cambiados, mensajeExtra);
+  renderTablasConfig();
+  renderSelectFilamentos();
+  renderResultado();
+}
+
+function renderEstadoPrecios(cambiados = 0, extra = '') {
+  const el = $('#estadoPrecios');
+  if (!conectado() && !precios.actualizado) {
+    el.textContent = 'Conectá tu Worker en "Sincronización" para traer los precios de PrintALot.';
+    el.className = 'estado';
+    return;
+  }
+  const partes = [precios.actualizado ? `Precios de PrintALot del ${fechaHora(precios.actualizado)}` : 'Todavía no se trajeron precios'];
+  if (cambiados) partes.push(`se actualizaron ${cambiados} filamento${cambiados > 1 ? 's' : ''}`);
+  if (extra) partes.push(extra);
+  el.textContent = partes.join(' · ');
+  el.className = `estado ${cambiados ? 'ok' : ''}`;
+}
+
+async function actualizarPreciosAhora() {
+  if (!conectado()) { renderEstadoPrecios(); return; }
+  const boton = $('#actualizarPrecios');
+  boton.disabled = true;
+  try {
+    const datos = await api('POST', '/precios/actualizar');
+    recibirPrecios(datos, datos.cacheado ? 'ya se habían actualizado hace minutos' : '');
+  } catch (e) {
+    $('#estadoPrecios').textContent = `No se pudieron actualizar: ${e.message}`;
+    $('#estadoPrecios').className = 'estado error';
+  } finally {
+    boton.disabled = false;
+  }
+}
+
+// ---------- Historial ----------
+// Con el Worker conectado la nube manda; localStorage queda como copia para usar sin conexión.
+const historial = {
+  async listar() {
+    if (conectado()) {
+      try {
+        const lista = await api('GET', '/evaluaciones');
+        escribirJson(HISTORIAL_KEY, lista);
+        return lista;
+      } catch (e) {
+        marcarNube('error', e.message);
+      }
+    }
+    return leerJson(HISTORIAL_KEY, []);
+  },
+  async guardar(entrada) {
+    escribirJson(HISTORIAL_KEY, [entrada, ...leerJson(HISTORIAL_KEY, [])]);
+    if (conectado()) await api('PUT', `/evaluaciones/${encodeURIComponent(entrada.id)}`, entrada);
+  },
+  async borrar(id) {
+    escribirJson(HISTORIAL_KEY, leerJson(HISTORIAL_KEY, []).filter((e) => e.id !== id));
+    if (conectado()) await api('DELETE', `/evaluaciones/${encodeURIComponent(id)}`);
+  },
+};
+
+// ---------- Cálculo ----------
+function roundUp(value, step) {
+  return step > 0 ? Math.ceil(value / step) * step : Math.round(value);
+}
+
+function descuentoEscala(cfg, cantidad) {
+  return cfg.escalas
+    .filter((e) => e.desde > 0 && cantidad >= e.desde)
+    .reduce((max, e) => Math.max(max, e.descuento), 0);
+}
+
+function calcular(cfg, t) {
+  const fil = cfg.filamentos.find((f) => f.id === t.filamentoId) || cfg.filamentos[0];
+  const horas = t.horas + t.minutos / 60;
+  const cantidad = Math.max(1, Math.round(t.cantidad) || 1);
+
+  const material = fil.pesoRollo > 0 ? (t.gramos * fil.precioRollo) / fil.pesoRollo : 0;
+  const kw = (fil.consumoW + cfg.consumoRaspberryW) / 1000;
+  const electricidad = kw * horas * cfg.tarifaKwh;
+  const amortizacion = cfg.vidaUtilHoras > 0 ? (horas * cfg.valorImpresora) / cfg.vidaUtilHoras : 0;
+  const mantenimiento = horas * cfg.mantenimientoHora;
+  const fallas = (material + electricidad + amortizacion + mantenimiento) * cfg.fallasPct / 100;
+  const otros = t.otros;
+  const diseno = t.horasDiseno * cfg.tarifaDisenoHora;
+  const disenoCobrado = t.bonificarDiseno ? 0 : diseno;
+
+  const produccion = material + electricidad + amortizacion + mantenimiento + fallas + otros;
+  const costoTotal = produccion + diseno;
+
+  const sugeridoUnidad = roundUp((produccion * (1 + cfg.gananciaPct / 100)) / cantidad, cfg.redondeo);
+  const descuentoSugerido = descuentoEscala(cfg, cantidad);
+  const listaUnidad = t.precioManual ?? sugeridoUnidad;
+  const descuentoPct = Math.min(100, t.descuento ?? descuentoSugerido);
+  // Redondeo fino ($10) para que el redondeo general no se "coma" el descuento
+  const finalUnidad = Math.min(listaUnidad, roundUp(listaUnidad * (1 - descuentoPct / 100), 10));
+  const descuentoMonto = (listaUnidad - finalUnidad) * cantidad;
+  const total = finalUnidad * cantidad + disenoCobrado;
+  const ganancia = total - costoTotal;
+
+  const kwh = kw * horas;
+  const precioGramo = fil.pesoRollo > 0 ? fil.precioRollo / fil.pesoRollo : 0;
+
+  return {
+    filamento: fil,
+    horas,
+    cantidad,
+    lineas: [
+      { nombre: 'Material', valor: material, detalle: `${t.gramos} g × ${money.format(precioGramo)}/g`, fija: true },
+      { nombre: 'Electricidad', valor: electricidad, detalle: `${kwh.toFixed(2)} kWh × ${money.format(cfg.tarifaKwh)}`, fija: true },
+      { nombre: 'Amortización impresora', valor: amortizacion, detalle: `${horas.toFixed(2)} h × ${money.format(cfg.valorImpresora / (cfg.vidaUtilHoras || 1))}/h`, fija: true },
+      { nombre: 'Mantenimiento', valor: mantenimiento, detalle: `${horas.toFixed(2)} h × ${money.format(cfg.mantenimientoHora)}/h` },
+      { nombre: 'Margen por fallas', valor: fallas, detalle: `${cfg.fallasPct}% de material, luz, amortización y mantenimiento` },
+      { nombre: 'Otros insumos', valor: otros, detalle: '' },
+      { nombre: 'Diseño', valor: diseno, detalle: `${t.horasDiseno} h × ${money.format(cfg.tarifaDisenoHora)}/h${t.bonificarDiseno ? ' · bonificado' : ''}` },
+    ],
+    produccion,
+    diseno,
+    disenoCobrado,
+    costoTotal,
+    sugeridoUnidad,
+    descuentoSugerido,
+    listaUnidad,
+    descuentoPct,
+    finalUnidad,
+    descuentoMonto,
+    total,
+    ganancia,
+    margenPct: total > 0 ? (ganancia / total) * 100 : 0,
+  };
+}
+
+// ---------- Formulario de trabajo ----------
+const CAMPOS_TRABAJO = ['nombre', 'concepto', 'cantidad', 'gramos', 'horas', 'minutos',
+  'horasDiseno', 'bonificarDiseno', 'otros', 'precioManual', 'descuento', 'notas'];
+
+function leerTrabajo() {
+  return {
+    nombre: $('#nombre').value.trim(),
+    concepto: $('#concepto').value.trim(),
+    filamentoId: $('#filamento').value,
+    color: $('#color').value,
+    cantidad: num($('#cantidad').value),
+    gramos: num($('#gramos').value),
+    horas: num($('#horas').value),
+    minutos: num($('#minutos').value),
+    horasDiseno: num($('#horasDiseno').value),
+    bonificarDiseno: $('#bonificarDiseno').checked,
+    otros: num($('#otros').value),
+    precioManual: numOrNull($('#precioManual').value),
+    descuento: numOrNull($('#descuento').value),
+    notas: $('#notas').value.trim(),
+  };
+}
+
+function cargarTrabajo(t) {
+  for (const campo of CAMPOS_TRABAJO) {
+    const el = $(`#${campo}`);
+    if (el.type === 'checkbox') el.checked = Boolean(t[campo]);
+    else el.value = t[campo] ?? '';
+  }
+  $('#filamento').value = t.filamentoId;
+  renderSelectColores();
+  $('#color').value = t.color ?? '';
+  renderResultado();
+}
+
+function filaDl(dl, etiqueta, valor, clase) {
+  const div = document.createElement('div');
+  if (clase) div.className = clase;
+  const dt = document.createElement('dt');
+  const dd = document.createElement('dd');
+  dt.textContent = etiqueta;
+  dd.textContent = valor;
+  div.append(dt, dd);
+  dl.append(div);
+}
+
+function renderResultado() {
+  const t = leerTrabajo();
+  const r = calcular(config, t);
+
+  $('#desglose').replaceChildren(...r.lineas
+    .filter((l) => l.valor > 0 || l.fija)
+    .map((l) => {
+      const pct = r.costoTotal > 0 ? (l.valor / r.costoTotal) * 100 : 0;
+      const li = document.createElement('li');
+      li.innerHTML = `
+        <div class="linea"><span></span><strong></strong></div>
+        <div class="detalle"></div>
+        <div class="barra"><span style="width:${pct.toFixed(1)}%"></span></div>`;
+      li.querySelector('.linea span').textContent = l.nombre;
+      li.querySelector('.linea strong').textContent = money.format(l.valor);
+      li.querySelector('.detalle').textContent = l.detalle;
+      return li;
+    }));
+
+  const costos = $('#costos');
+  costos.replaceChildren();
+  filaDl(costos, 'Costo total', money.format(r.costoTotal));
+  if (r.cantidad > 1) filaDl(costos, 'Costo por unidad (sin diseño)', money.format(r.produccion / r.cantidad));
+
+  const dlPrecio = $('#precios');
+  dlPrecio.replaceChildren();
+  filaDl(dlPrecio, `Sugerido por unidad (costo + ${config.gananciaPct}%)`, money.format(r.sugeridoUnidad));
+  if (t.precioManual != null) filaDl(dlPrecio, 'Tu precio de lista por unidad', money.format(r.listaUnidad));
+  if (r.descuentoMonto > 0) {
+    filaDl(dlPrecio, `Descuento por cantidad (${r.descuentoPct}%)`, `− ${money.format(r.descuentoMonto)}`);
+    filaDl(dlPrecio, 'Precio final por unidad', money.format(r.finalUnidad));
+  }
+  if (r.diseno > 0) filaDl(dlPrecio, 'Diseño', t.bonificarDiseno ? 'Bonificado' : money.format(r.disenoCobrado));
+  filaDl(dlPrecio, 'Total a cobrar', money.format(r.total), 'destacado');
+  filaDl(dlPrecio, 'Ganancia real', `${money.format(r.ganancia)} (${r.margenPct.toFixed(0)}%)`, r.ganancia >= 0 ? 'positivo' : 'negativo');
+
+  const aviso = $('#aviso');
+  aviso.hidden = r.ganancia >= 0 || r.total === 0;
+  if (r.ganancia < 0) {
+    const sinDiseno = r.total - r.produccion;
+    aviso.textContent = sinDiseno >= 0
+      ? `Cubrís los costos de producción, pero no tu hora de diseño (te faltan ${money.format(-r.ganancia)}). Vale la pena si esperás un pedido más grande.`
+      : `Estás cobrando por debajo del costo de producción: perdés ${money.format(-sinDiseno)} sin contar el diseño.`;
+  }
+
+  $('#precioManual').placeholder = `${r.sugeridoUnidad} (sugerido)`;
+  $('#descuento').placeholder = `${r.descuentoSugerido} (según escala)`;
+
+  renderPresupuesto(t, r);
+}
+
+// ---------- Colores ----------
+function crearMuestra(hex) {
+  const s = document.createElement('span');
+  s.className = 'muestra';
+  s.style.background = hex;
+  return s;
+}
+
+function crearChip(color, onBorrar) {
+  const chip = document.createElement('span');
+  chip.className = 'chip';
+  chip.append(crearMuestra(color.hex), color.nombre);
+  if (onBorrar) {
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'icon-btn';
+    x.title = `Quitar ${color.nombre}`;
+    x.textContent = '✕';
+    x.addEventListener('click', onBorrar);
+    chip.append(x);
+  } else {
+    chip.style.paddingRight = '0.6rem';
+  }
+  return chip;
+}
+
+function renderSelectColores() {
+  const select = $('#color');
+  const actual = select.value;
+  const fil = config.filamentos.find((f) => f.id === $('#filamento').value) || config.filamentos[0];
+  const opciones = [['', 'A elegir por el cliente'], ...fil.colores.map((c) => [c.nombre, c.nombre])];
+  select.replaceChildren(...opciones.map(([valor, texto]) => new Option(texto, valor)));
+  if (fil.colores.some((c) => c.nombre === actual)) select.value = actual;
+}
+
+function renderEditorColores() {
+  $('#editorColores').replaceChildren(...config.filamentos.map((f) => {
+    const bloque = document.createElement('div');
+    const titulo = document.createElement('h3');
+    titulo.textContent = f.nombre || '(sin nombre)';
+
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    if (f.colores.length) {
+      chips.append(...f.colores.map((c, i) => crearChip(c, () => {
+        f.colores.splice(i, 1);
+        saveConfig();
+        renderColores();
+      })));
+    } else {
+      chips.innerHTML = '<span class="vacio">Sin colores cargados</span>';
+    }
+
+    const form = document.createElement('form');
+    form.className = 'nuevo-color';
+    const nombre = document.createElement('input');
+    nombre.placeholder = 'Nuevo color, ej: Rojo';
+    nombre.setAttribute('aria-label', `Nuevo color de ${f.nombre}`);
+    const hex = document.createElement('input');
+    hex.type = 'color';
+    hex.value = '#9e9e9e';
+    hex.setAttribute('aria-label', 'Tono');
+    const agregar = document.createElement('button');
+    agregar.className = 'btn small';
+    agregar.textContent = 'Agregar';
+    // Sugiere el tono según el nombre hasta que elijas uno a mano
+    nombre.addEventListener('input', () => { if (!hex.dataset.elegido) hex.value = hexDeNombre(nombre.value); });
+    hex.addEventListener('input', () => { hex.dataset.elegido = '1'; });
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const n = nombre.value.trim();
+      if (!n) return;
+      f.colores.push({ nombre: n, hex: hex.value });
+      saveConfig();
+      renderColores();
+    });
+    form.append(nombre, hex, agregar);
+
+    bloque.append(titulo, chips, form);
+    return bloque;
+  }));
+}
+
+function renderCatalogo() {
+  const conColores = config.filamentos.filter((f) => f.colores.length);
+  const cont = $('#catalogoContenido');
+  if (!conColores.length) {
+    cont.innerHTML = '<p class="catalogo-vacio">Todavía no cargaste colores.</p>';
+    return;
+  }
+  cont.replaceChildren(...conColores.map((f) => {
+    const sec = document.createElement('section');
+    sec.className = 'catalogo-material';
+    const h3 = document.createElement('h3');
+    h3.textContent = f.nombre;
+    const grilla = document.createElement('div');
+    grilla.className = 'catalogo-colores';
+    grilla.append(...f.colores.map((c) => {
+      const fig = document.createElement('figure');
+      fig.append(crearMuestra(c.hex), c.nombre);
+      return fig;
+    }));
+    sec.append(h3, grilla);
+    return sec;
+  }));
+}
+
+function renderColores() {
+  renderEditorColores();
+  renderCatalogo();
+  renderSelectColores();
+  renderResultado();
+}
+
+// ---------- Presupuesto ----------
+function filaPresupuesto(concepto, cant, unit, subtotal, clase) {
+  const tr = document.createElement('tr');
+  if (clase) tr.className = clase;
+  for (const v of [concepto, cant, unit, subtotal]) {
+    const td = document.createElement('td');
+    if (v instanceof Node) td.append(v); else td.textContent = v;
+    tr.append(td);
+  }
+  return tr;
+}
+
+function renderNegocio() {
+  document.querySelectorAll('.pNegocio').forEach((el) => { el.textContent = config.nombreNegocio || 'Impresión 3D'; });
+  document.querySelectorAll('.pContacto').forEach((el) => { el.textContent = config.contacto; });
+}
+
+function renderPresupuesto(t, r) {
+  renderNegocio();
+  $('#pFecha').textContent = new Date().toLocaleDateString('es-AR', { dateStyle: 'long' });
+  $('#pCliente').textContent = t.nombre ? `Cliente: ${t.nombre}` : '';
+
+  const material = [r.filamento.nombre, t.color].filter(Boolean).join(' ');
+  const concepto = `${t.concepto || 'Pieza impresa en 3D'} (${material})`;
+  const items = [filaPresupuesto(concepto, r.cantidad, money.format(r.listaUnidad), money.format(r.listaUnidad * r.cantidad))];
+
+  if (r.diseno > 0) {
+    if (t.bonificarDiseno) {
+      const s = document.createElement('s');
+      s.textContent = money.format(r.diseno);
+      const sub = document.createDocumentFragment();
+      sub.append(s, 'Bonificado');
+      items.push(filaPresupuesto('Diseño personalizado', 1, money.format(r.diseno), sub, 'bonificado'));
+    } else {
+      items.push(filaPresupuesto('Diseño personalizado', 1, money.format(r.diseno), money.format(r.diseno)));
+    }
+  }
+  if (r.descuentoMonto > 0) {
+    items.push(filaPresupuesto(`Descuento por cantidad (${r.descuentoPct}%)`, '', '', `− ${money.format(r.descuentoMonto)}`, 'descuento'));
+  }
+  $('#pItems').replaceChildren(...items);
+  $('#pTotal').textContent = money.format(r.total);
+
+  const colores = $('#pColores');
+  colores.replaceChildren();
+  if (!t.color && r.filamento.colores.length) {
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    chips.append(...r.filamento.colores.map((c) => crearChip(c)));
+    colores.append(`Colores disponibles en ${r.filamento.nombre}:`, chips);
+  }
+  $('#pNotas').textContent = t.notas;
+  $('#pValidez').textContent = config.validezDias > 0
+    ? `Presupuesto válido por ${config.validezDias} días desde la fecha de emisión.`
+    : '';
+}
+
+// ---------- Exportar ----------
+function nombreArchivo(id, ext) {
+  const fecha = new Date().toISOString().slice(0, 10);
+  if (id === 'catalogoPapel') return `Catálogo de colores ${fecha}.${ext}`;
+  const cliente = ($('#nombre').value.trim() || 'presupuesto').replace(/[^\w\- áéíóúñÁÉÍÓÚÑ]/g, '').trim();
+  return `Presupuesto ${cliente} ${fecha}.${ext}`;
+}
+
+function cargarScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('No se pudo cargar ' + src));
+    document.head.append(s);
+  });
+}
+
+async function exportarJpg(id, boton) {
+  boton.disabled = true;
+  try {
+    if (!window.html2canvas) await cargarScript(HTML2CANVAS_URL);
+    const canvas = await window.html2canvas(document.getElementById(id), { scale: 2, backgroundColor: '#ffffff' });
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/jpeg', 0.92);
+    a.download = nombreArchivo(id, 'jpg');
+    a.click();
+  } catch (e) {
+    alert('No se pudo generar la imagen. ¿Hay conexión a internet?\n' + e.message);
+  } finally {
+    boton.disabled = false;
+  }
+}
+
+function exportarPdf(id) {
+  const tituloOriginal = document.title;
+  document.title = nombreArchivo(id, 'pdf').replace(/\.pdf$/, ''); // nombre sugerido al "Guardar como PDF"
+  document.body.dataset.imprimir = id;
+  window.print();
+  document.title = tituloOriginal;
+}
+window.addEventListener('afterprint', () => { delete document.body.dataset.imprimir; });
+
+// ---------- Historial (UI) ----------
+async function renderHistorial() {
+  $('#notaHistorial').textContent = conectado()
+    ? 'Guardado en tu Worker de Cloudflare: lo ves igual en la PC y en el celular. Al cargar una evaluación se recalcula con la configuración actual.'
+    : 'Guardado solo en este navegador. Conectá tu Worker en Configuración para verlo también en el celular.';
+  const lista = await historial.listar();
+  const ul = $('#listaHistorial');
+  if (!lista.length) {
+    const li = document.createElement('li');
+    li.className = 'vacio';
+    li.textContent = 'Todavía no guardaste ninguna evaluación.';
+    ul.replaceChildren(li);
+    return;
+  }
+  ul.replaceChildren(...lista.map((e) => {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <div class="info"><strong></strong><small></small></div>
+      <div class="acciones" style="margin:0">
+        <button class="btn small secondary" data-accion="cargar">Cargar</button>
+        <button class="icon-btn" data-accion="borrar" title="Borrar">✕</button>
+      </div>`;
+    li.querySelector('strong').textContent = `${e.trabajo.nombre || 'Sin cliente'} · ${e.trabajo.concepto || 'Pieza 3D'}`;
+    li.querySelector('small').textContent =
+      `${new Date(e.fecha).toLocaleDateString('es-AR')} · ${e.resumen.cantidad} u. de ${e.resumen.filamento} · ` +
+      `Total ${money.format(e.resumen.total)} · Ganancia ${money.format(e.resumen.ganancia)}`;
+    li.querySelector('[data-accion="cargar"]').addEventListener('click', () => {
+      cargarTrabajo(e.trabajo);
+      activarTab('calcular');
+    });
+    li.querySelector('[data-accion="borrar"]').addEventListener('click', async () => {
+      if (!confirm('¿Borrar esta evaluación?')) return;
+      try { await historial.borrar(e.id); } catch (err) { alert(`Se borró en este dispositivo, pero no en la nube: ${err.message}`); }
+      renderHistorial();
+    });
+    return li;
+  }));
+}
+
+async function guardarEvaluacion() {
+  const t = leerTrabajo();
+  const r = calcular(config, t);
+  const boton = $('#guardar');
+  boton.disabled = true;
+  try {
+    await historial.guardar({
+      id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+      fecha: new Date().toISOString(),
+      trabajo: t,
+      resumen: {
+        filamento: r.filamento.nombre,
+        cantidad: r.cantidad,
+        costoTotal: Math.round(r.costoTotal),
+        total: r.total,
+        ganancia: Math.round(r.ganancia),
+        margenPct: Math.round(r.margenPct),
+      },
+    });
+    boton.textContent = '✓ Guardado';
+  } catch (e) {
+    alert(`Se guardó en este dispositivo, pero no en la nube: ${e.message}`);
+  } finally {
+    boton.disabled = false;
+    setTimeout(() => { boton.textContent = 'Guardar en historial'; }, 1500);
+    renderHistorial();
+  }
+}
+
+async function exportarCsv() {
+  const lista = await historial.listar();
+  const decimal = (n) => String(n).replace('.', ',');
+  const celda = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const filas = [
+    ['Fecha', 'Cliente', 'Concepto', 'Filamento', 'Color', 'Cantidad', 'Gramos', 'Horas impresión', 'Horas diseño',
+      'Diseño bonificado', 'Costo total', 'Total cobrado', 'Ganancia', 'Margen %'],
+    ...lista.map((e) => [
+      new Date(e.fecha).toLocaleDateString('es-AR'),
+      e.trabajo.nombre, e.trabajo.concepto, e.resumen.filamento, e.trabajo.color, e.resumen.cantidad,
+      decimal(e.trabajo.gramos), decimal(+(e.trabajo.horas + e.trabajo.minutos / 60).toFixed(2)),
+      decimal(e.trabajo.horasDiseno), e.trabajo.bonificarDiseno ? 'Sí' : 'No',
+      e.resumen.costoTotal, e.resumen.total, e.resumen.ganancia, e.resumen.margenPct,
+    ]),
+  ];
+  // Punto y coma + BOM para que Excel en español lo abra bien
+  const csv = '﻿' + filas.map((f) => f.map(celda).join(';')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `historial-impresiones-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ---------- Configuración (UI) ----------
+function renderConfigInputs() {
+  document.querySelectorAll('[data-config]').forEach((input) => {
+    input.value = config[input.dataset.config];
+  });
+}
+
+function renderSelectFilamentos() {
+  const select = $('#filamento');
+  const actual = select.value;
+  select.replaceChildren(...config.filamentos.map((f) =>
+    new Option(`${f.nombre || '(sin nombre)'} – ${money.format(f.precioRollo)} / ${f.pesoRollo} g`, f.id)));
+  if (config.filamentos.some((f) => f.id === actual)) select.value = actual;
+  renderSelectColores();
+}
+
+function opcionesPrintalot(item) {
+  const opciones = [['', 'Manual (sin vincular)']];
+  for (const p of precios.productos) {
+    opciones.push([p.id, `${p.nombre} – ${money.format(p.precio)}${p.enStock ? '' : ' (sin stock)'}`]);
+  }
+  if (item.printalotId != null && !precios.productos.some((p) => p.id === item.printalotId)) {
+    opciones.push([item.printalotId, `Producto PrintALot #${item.printalotId}`]);
+  }
+  return opciones;
+}
+
+// Tabla editable genérica (filamentos y escalas)
+function renderTabla(tbody, items, campos, { minimo = 0, onCambio }) {
+  tbody.replaceChildren(...items.map((item, i) => {
+    const tr = document.createElement('tr');
+    for (const { clave, tipo, placeholder, opciones } of campos) {
+      const td = document.createElement('td');
+      let input;
+      if (tipo === 'select') {
+        input = document.createElement('select');
+        input.append(...opciones(item).map(([v, t]) => new Option(t, v)));
+        input.value = item[clave] ?? '';
+        input.addEventListener('change', () => {
+          item[clave] = numOrNull(input.value);
+          onCambio(false, clave);
+        });
+      } else {
+        input = document.createElement('input');
+        input.type = tipo;
+        input.value = item[clave];
+        if (placeholder) input.placeholder = placeholder;
+        if (tipo === 'number') input.min = '0';
+        input.addEventListener('input', () => {
+          item[clave] = tipo === 'number' ? num(input.value) : input.value;
+          onCambio(false, clave);
+        });
+      }
+      input.setAttribute('aria-label', clave);
+      td.append(input);
+      tr.append(td);
+    }
+    const td = document.createElement('td');
+    const borrar = document.createElement('button');
+    borrar.className = 'icon-btn';
+    borrar.title = 'Eliminar';
+    borrar.textContent = '✕';
+    borrar.disabled = items.length <= minimo;
+    borrar.addEventListener('click', () => {
+      items.splice(i, 1);
+      onCambio(true);
+    });
+    td.append(borrar);
+    tr.append(td);
+    return tr;
+  }));
+}
+
+function renderTablasConfig() {
+  const alCambiar = (estructural, clave) => {
+    // Vincular un producto aplica su precio al instante
+    if (clave === 'printalotId' && aplicarPrecios()) estructural = true;
+    saveConfig();
+    if (estructural) renderTablasConfig();
+    renderSelectFilamentos();
+    if (clave === 'nombre' || estructural) { renderEditorColores(); renderCatalogo(); }
+    renderResultado();
+  };
+  renderTabla($('#filamentosBody'), config.filamentos, [
+    { clave: 'nombre', tipo: 'text' },
+    { clave: 'printalotId', tipo: 'select', opciones: opcionesPrintalot },
+    { clave: 'precioRollo', tipo: 'number' },
+    { clave: 'pesoRollo', tipo: 'number' },
+    { clave: 'consumoW', tipo: 'number' },
+  ], { minimo: 1, onCambio: alCambiar });
+  renderTabla($('#escalasBody'), config.escalas, [
+    { clave: 'desde', tipo: 'number' },
+    { clave: 'descuento', tipo: 'number' },
+  ], { onCambio: alCambiar });
+}
+
+function renderTodo() {
+  renderConfigInputs();
+  renderTablasConfig();
+  renderSelectFilamentos();
+  renderEditorColores();
+  renderCatalogo();
+  renderEstadoPrecios();
+  renderResultado();
+}
+
+// ---------- Eventos ----------
+function activarTab(id) {
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === id));
+  document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === id));
+  window.scrollTo({ top: 0 });
+}
+
+document.querySelectorAll('.tab').forEach((tab) => {
+  tab.addEventListener('click', () => activarTab(tab.dataset.tab));
+});
+
+$('#trabajo').addEventListener('input', (e) => {
+  if (e.target.id === 'filamento') renderSelectColores();
+  renderResultado();
+});
+$('#trabajo').addEventListener('reset', () => setTimeout(() => { renderSelectColores(); renderResultado(); }));
+
+document.querySelectorAll('[data-config]').forEach((input) => {
+  input.addEventListener('input', () => {
+    config[input.dataset.config] = input.type === 'number' ? num(input.value) : input.value;
+    saveConfig();
+    renderSelectFilamentos();
+    renderResultado();
+  });
+});
+
+$('#agregarFilamento').addEventListener('click', () => {
+  config.filamentos.push({ id: `f${Date.now()}`, nombre: 'Nuevo', printalotId: null, precioRollo: 0, pesoRollo: 1000, consumoW: 80, colores: [] });
+  saveConfig();
+  renderTodo();
+});
+
+$('#agregarEscala').addEventListener('click', () => {
+  config.escalas.push({ desde: 0, descuento: 0 });
+  saveConfig();
+  renderTablasConfig();
+});
+
+$('#restaurar').addEventListener('click', () => {
+  if (!confirm('¿Restaurar toda la configuración a los valores por defecto? Se pierden los colores cargados.')) return;
+  config = structuredClone(DEFAULTS);
+  aplicarPrecios();
+  saveConfig();
+  renderTodo();
+});
+
+$('#conectar').addEventListener('click', async () => {
+  const anterior = conexion;
+  conexion = { apiUrl: $('#apiUrl').value.trim(), apiToken: $('#apiToken').value.trim() };
+  if (!conectado()) { conexion = anterior; estadoConexion('Completá la URL y el token.', 'error'); return; }
+  estadoConexion('Conectando…');
+  try {
+    // Sube lo que se haya guardado en este navegador antes de conectar
+    const remotos = new Set((await api('GET', '/evaluaciones')).map((e) => e.id));
+    const pendientes = leerJson(HISTORIAL_KEY, []).filter((e) => !remotos.has(e.id));
+    for (const e of pendientes) await api('PUT', `/evaluaciones/${encodeURIComponent(e.id)}`, e);
+    escribirJson(CONEXION_KEY, conexion);
+    await sincronizarInicio();
+    if (pendientes.length) estadoConexion(`Conectado ✓ · se subieron ${pendientes.length} evaluaciones`, 'ok');
+  } catch (e) {
+    conexion = anterior;
+    estadoConexion(`No se pudo conectar: ${e.message}`, 'error');
+  }
+});
+
+$('#desconectar').addEventListener('click', () => {
+  conexion = { apiUrl: '', apiToken: '' };
+  escribirJson(CONEXION_KEY, conexion);
+  $('#apiUrl').value = '';
+  $('#apiToken').value = '';
+  marcarNube(null);
+  estadoConexion('Desconectado. Los datos siguen guardados en este navegador.');
+  renderEstadoPrecios();
+  renderHistorial();
+});
+
+$('#actualizarPrecios').addEventListener('click', actualizarPreciosAhora);
+$('#guardar').addEventListener('click', guardarEvaluacion);
+$('#exportarCsv').addEventListener('click', exportarCsv);
+document.querySelectorAll('[data-exportar-pdf]').forEach((b) => b.addEventListener('click', () => exportarPdf(b.dataset.exportarPdf)));
+document.querySelectorAll('[data-exportar-jpg]').forEach((b) => b.addEventListener('click', () => exportarJpg(b.dataset.exportarJpg, b)));
+
+// ---------- Inicio ----------
+$('#apiUrl').value = conexion.apiUrl;
+$('#apiToken').value = conexion.apiToken;
+renderTodo();
+if (conectado()) sincronizarInicio(); else renderHistorial();

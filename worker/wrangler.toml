@@ -1,0 +1,16 @@
+name = "calculadora-3d-api"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+# Orígenes que pueden llamar al Worker (GitHub Pages y el servidor local)
+ALLOWED_ORIGINS = "https://maxinunez24.github.io,http://localhost:8000"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "calculadora-3d"
+database_id = "REEMPLAZAR-con-el-id-que-devuelve-wrangler-d1-create"
+
+# Actualiza los precios de PrintALot los lunes a las 9:00 (hora argentina)
+[triggers]
+crons = ["0 12 * * 1"]

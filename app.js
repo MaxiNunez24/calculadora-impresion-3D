@@ -1030,7 +1030,17 @@ async function exportarJpg(id, boton) {
   boton.disabled = true;
   try {
     if (!window.html2canvas) await cargarScript(HTML2CANVAS_URL);
-    const canvas = await window.html2canvas(document.getElementById(id), { scale: 2, backgroundColor: '#ffffff' });
+    // Ancho fijo de documento: en el celular sale igual que en la PC, sin recortes
+    const ANCHO_JPG = 680;
+    const canvas = await window.html2canvas(document.getElementById(id), {
+      scale: 2,
+      backgroundColor: '#ffffff',
+      windowWidth: 1280,
+      onclone: (doc) => {
+        const el = doc.getElementById(id);
+        Object.assign(el.style, { width: `${ANCHO_JPG}px`, minWidth: `${ANCHO_JPG}px`, maxWidth: 'none', margin: '0' });
+      },
+    });
     const a = document.createElement('a');
     a.href = canvas.toDataURL('image/jpeg', 0.92);
     a.download = nombreArchivo(id, 'jpg');

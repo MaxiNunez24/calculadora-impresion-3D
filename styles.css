@@ -261,7 +261,7 @@ table.editable input, table.editable select { margin: 0; }
 .papel-tabla th:first-child, .papel-tabla td:first-child { text-align: left; }
 .papel-tabla thead th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: #65676b; font-weight: 600; }
 .papel-tabla .bonificado td, .papel-tabla .descuento td { color: #2e7d32; }
-.papel-tabla .bonificado s { color: #9aa0a6; margin-right: 0.35rem; }
+.papel-tabla .bonificado s { color: #9aa0a6; display: block; }
 .papel-tabla tfoot th, .papel-tabla tfoot td { font-size: 1.1rem; font-weight: 700; border-bottom: 0; border-top: 2px solid #1c1e21; }
 .papel-texto { margin: 0 0 0.5rem; font-size: 0.88rem; }
 .papel-texto:empty { display: none; }
@@ -278,6 +278,13 @@ table.editable input, table.editable select { margin: 0; }
 .catalogo-colores figure { margin: 0; text-align: center; font-size: 0.8rem; }
 .catalogo-colores .muestra { width: 3rem; height: 3rem; display: block; margin: 0 auto 0.3rem; border-radius: 10px; }
 .catalogo-vacio { color: #65676b; }
+
+@media (max-width: 480px) {
+  .papel { min-width: 0; font-size: 0.82rem; }
+  .papel-header h1 { font-size: 1.1rem; }
+  .papel-tabla th, .papel-tabla td { padding: 0.4rem 0.2rem; }
+  .papel-tabla td:not(:first-child) { white-space: nowrap; }
+}
 
 @media print {
   @page { margin: 1.5cm; }

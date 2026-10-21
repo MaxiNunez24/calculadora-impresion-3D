@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Calculadora de impresión 3D</title>
   <meta name="description" content="Costos, presupuestos y catálogo de colores para impresión 3D">
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body class="bloqueado">
   <!-- Pantalla de ingreso: la contraseña es el token del Worker, que es lo que protege los datos -->
@@ -62,7 +62,13 @@
           <label>Cantidad
             <input id="cantidad" type="number" min="1" step="1" value="1" inputmode="numeric">
           </label>
-          <label>Peso total (g)
+          <label>Peso y tiempo de…
+            <select id="modoCarga">
+              <option value="tanda">Toda la tanda</option>
+              <option value="unidad">Una unidad</option>
+            </select>
+          </label>
+          <label>Peso (g)
             <input id="gramos" type="number" min="0" step="0.1" value="0" inputmode="decimal">
           </label>
           <label>Horas de impresión
@@ -71,7 +77,7 @@
           <label>Minutos
             <input id="minutos" type="number" min="0" max="59" step="1" value="0" inputmode="numeric">
           </label>
-          <small class="ancho ayuda">Peso y tiempo de toda la tanda, como los muestra PrusaSlicer.</small>
+          <small class="ancho ayuda" id="ayudaCarga"></small>
           <label>Horas de diseño
             <input id="horasDiseno" type="number" min="0" step="0.25" value="0" inputmode="decimal">
           </label>
@@ -340,6 +346,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

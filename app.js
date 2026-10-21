@@ -46,6 +46,7 @@ const $ = (sel) => document.querySelector(sel);
 const money = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
 const num = (v) => (Number.isFinite(+v) ? +v : 0);
 const numOrNull = (v) => (v === '' || !Number.isFinite(+v) ? null : +v);
+const dec = (n) => (+n).toLocaleString('es-AR', { maximumFractionDigits: 2 });
 const fechaHora = (iso) => new Date(iso).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
 
 function leerJson(clave, porDefecto) {
@@ -350,10 +351,13 @@ function descuentoEscala(cfg, cantidad) {
 
 function calcular(cfg, t) {
   const fil = cfg.filamentos.find((f) => f.id === t.filamentoId) || cfg.filamentos[0];
-  const horas = t.horas + t.minutos / 60;
   const cantidad = Math.max(1, Math.round(t.cantidad) || 1);
+  // Peso y tiempo pueden cargarse de una unidad (se multiplican) o de toda la tanda
+  const factor = t.porUnidad ? cantidad : 1;
+  const gramos = t.gramos * factor;
+  const horas = (t.horas + t.minutos / 60) * factor;
 
-  const material = fil.pesoRollo > 0 ? (t.gramos * fil.precioRollo) / fil.pesoRollo : 0;
+  const material = fil.pesoRollo > 0 ? (gramos * fil.precioRollo) / fil.pesoRollo : 0;
   const kw = (fil.consumoW + cfg.consumoRaspberryW) / 1000;
   const electricidad = kw * horas * cfg.tarifaKwh;
   const amortizacion = cfg.vidaUtilHoras > 0 ? (horas * cfg.valorImpresora) / cfg.vidaUtilHoras : 0;
@@ -390,15 +394,16 @@ function calcular(cfg, t) {
   return {
     filamento: fil,
     horas,
+    gramos,
     cantidad,
     lineas: [
-      { nombre: 'Material', valor: material, detalle: `${t.gramos} g × ${money.format(precioGramo)}/g (${money.format(fil.precioRollo)} el rollo de ${fil.pesoRollo} g)`, fija: true },
-      { nombre: 'Electricidad', valor: electricidad, detalle: `(${fil.consumoW} W impresora + ${cfg.consumoRaspberryW} W Raspberry) × ${hs} h = ${kwh.toFixed(2)} kWh × ${money.format(cfg.tarifaKwh)}/kWh`, fija: true },
+      { nombre: 'Material', valor: material, detalle: `${t.porUnidad ? `${dec(t.gramos)} g × ${cantidad} u. = ${dec(gramos)} g` : `${dec(t.gramos)} g`} × ${money.format(precioGramo)}/g (${money.format(fil.precioRollo)} el rollo de ${fil.pesoRollo} g)`, fija: true },
+      { nombre: 'Electricidad', valor: electricidad, detalle: `(${fil.consumoW} W impresora + ${cfg.consumoRaspberryW} W Raspberry) × ${hs} h = ${dec(kwh)} kWh × ${money.format(cfg.tarifaKwh)}/kWh`, fija: true },
       { nombre: 'Amortización impresora', valor: amortizacion, detalle: `${money.format(cfg.valorImpresora)} ÷ ${cfg.vidaUtilHoras} h de vida útil = ${money.format(cfg.valorImpresora / (cfg.vidaUtilHoras || 1))}/h × ${hs} h`, fija: true },
       { nombre: 'Mantenimiento', valor: mantenimiento, detalle: `${money.format(cfg.mantenimientoHora)}/h × ${hs} h` },
       { nombre: 'Margen por fallas', valor: fallas, detalle: `${cfg.fallasPct}% de material + electricidad + amortización + mantenimiento` },
       { nombre: 'Otros insumos', valor: otros, detalle: 'Argollas, imanes, packaging…' },
-      { nombre: 'Diseño (tu tiempo)', valor: diseno, detalle: `${t.horasDiseno} h × ${money.format(cfg.tarifaDisenoHora)}/h${t.bonificarDiseno ? ' · bonificado: no se cobra' : ''}` },
+      { nombre: 'Diseño (tu tiempo)', valor: diseno, detalle: `${dec(t.horasDiseno)} h × ${money.format(cfg.tarifaDisenoHora)}/h${t.bonificarDiseno ? ' · bonificado: no se cobra' : ''}` },
     ],
     pasos: [
       { nombre: 'Costo de producción', valor: produccion, detalle: 'Material + electricidad + amortización + mantenimiento + fallas + insumos', clase: 'subtotal' },
@@ -416,7 +421,7 @@ function calcular(cfg, t) {
       ...(diseno > 0 ? [{
         nombre: '+ Diseño',
         valor: disenoCobrado,
-        detalle: t.bonificarDiseno ? `Bonificado: vale ${money.format(diseno)} pero no se cobra` : `${t.horasDiseno} h × ${money.format(cfg.tarifaDisenoHora)}/h`,
+        detalle: t.bonificarDiseno ? `Bonificado: vale ${money.format(diseno)} pero no se cobra` : `${dec(t.horasDiseno)} h × ${money.format(cfg.tarifaDisenoHora)}/h`,
       }] : []),
       { nombre: '= Subtotal', valor: subtotal, detalle: '', clase: 'subtotal' },
       ...(descuentoPct > 0 ? [{
@@ -455,6 +460,7 @@ function leerTrabajo() {
     filamentoId: $('#filamento').value,
     color: $('#color').value,
     cantidad: num($('#cantidad').value),
+    porUnidad: $('#modoCarga').value === 'unidad',
     gramos: num($('#gramos').value),
     horas: num($('#horas').value),
     minutos: num($('#minutos').value),
@@ -480,6 +486,7 @@ function cargarTrabajo(t) {
     if (el.type === 'checkbox') el.checked = Boolean(t[campo]);
     else el.value = t[campo] ?? '';
   }
+  $('#modoCarga').value = t.porUnidad ? 'unidad' : 'tanda';
   marcarManual($('#precioManual'), t.precioManual != null);
   marcarManual($('#descuento'), t.descuento != null);
   $('#filamento').value = t.filamentoId;
@@ -523,6 +530,12 @@ function renderResultado() {
   filaDl(costos, 'Costo de producción', money.format(r.produccion));
   if (r.diseno > 0) filaDl(costos, 'Costo total (con tu hora de diseño)', money.format(r.costoTotal));
   if (r.cantidad > 1) filaDl(costos, 'Costo por unidad (sin diseño)', money.format(r.produccion / r.cantidad));
+
+  const totalHoras = Math.floor(r.horas);
+  const totalMin = Math.round((r.horas - totalHoras) * 60);
+  $('#ayudaCarga').textContent = t.porUnidad
+    ? `Se multiplica por ${r.cantidad}: ${dec(r.gramos)} g y ${totalHoras} h ${totalMin} min en total.`
+    : 'Peso y tiempo de todas las unidades juntas, como los muestra PrusaSlicer con la cama completa.';
 
   // Paso a paso del precio
   $('#pasosPrecio').replaceChildren(...r.pasos.map((p) => {
@@ -1094,12 +1107,14 @@ async function exportarCsv() {
   const decimal = (n) => String(n).replace('.', ',');
   const celda = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const filas = [
-    ['Fecha', 'Cliente', 'Concepto', 'Filamento', 'Color', 'Cantidad', 'Gramos', 'Horas impresión', 'Horas diseño',
+    ['Fecha', 'Cliente', 'Concepto', 'Filamento', 'Color', 'Cantidad', 'Gramos (total)', 'Horas impresión (total)', 'Horas diseño',
       'Diseño bonificado', 'Costo total', 'Total cobrado', 'Ganancia', 'Margen %'],
     ...lista.map((e) => [
       new Date(e.fecha).toLocaleDateString('es-AR'),
       e.trabajo.nombre, e.trabajo.concepto, e.resumen.filamento, e.trabajo.color, e.resumen.cantidad,
-      decimal(e.trabajo.gramos), decimal(+(e.trabajo.horas + e.trabajo.minutos / 60).toFixed(2)),
+      // Las evaluaciones cargadas "por unidad" se pasan a totales de la tanda
+      decimal(+(e.trabajo.gramos * (e.trabajo.porUnidad ? e.trabajo.cantidad : 1)).toFixed(2)),
+      decimal(+((e.trabajo.horas + e.trabajo.minutos / 60) * (e.trabajo.porUnidad ? e.trabajo.cantidad : 1)).toFixed(2)),
       decimal(e.trabajo.horasDiseno), e.trabajo.bonificarDiseno ? 'Sí' : 'No',
       e.resumen.costoTotal, e.resumen.total, e.resumen.ganancia, e.resumen.margenPct,
     ]),

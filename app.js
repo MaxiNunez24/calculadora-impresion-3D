@@ -403,7 +403,7 @@ function calcular(cfg, t) {
     pasos: [
       { nombre: 'Costo de producción', valor: produccion, detalle: 'Material + electricidad + amortización + mantenimiento + fallas + insumos', clase: 'subtotal' },
       { nombre: `+ Ganancia (${cfg.gananciaPct}%)`, valor: gananciaPlaneada, detalle: `${money.format(produccion)} × ${cfg.gananciaPct}%` },
-      { nombre: '= Precio de producción', valor: precioProduccion, detalle: `Para las ${cantidad} unidades`, clase: 'subtotal' },
+      { nombre: '= Precio de producción', valor: precioProduccion, detalle: cantidad === 1 ? 'Para 1 unidad' : `Para las ${cantidad} unidades`, clase: 'subtotal' },
       {
         nombre: 'Precio por unidad',
         valor: listaUnidad,
@@ -1289,8 +1289,21 @@ $('#exportarCsv').addEventListener('click', exportarCsv);
 document.querySelectorAll('[data-exportar-pdf]').forEach((b) => b.addEventListener('click', () => exportarPdf(b.dataset.exportarPdf)));
 document.querySelectorAll('[data-exportar-jpg]').forEach((b) => b.addEventListener('click', () => exportarJpg(b.dataset.exportarJpg, b)));
 
+// ---------- Versión nueva ----------
+// GitHub Pages deja que el navegador guarde la página 10 minutos: si hay una versión
+// publicada más nueva que la que está corriendo, se recarga sola.
+async function buscarVersionNueva() {
+  const actual = document.querySelector('script[src^="app.js"]')?.getAttribute('src');
+  try {
+    const html = await (await fetch(`./?nocache=${Date.now()}`, { cache: 'no-store' })).text();
+    const publicada = html.match(/src="(app\.js\?v=[^"]+)"/)?.[1];
+    if (actual && publicada && publicada !== actual) location.reload();
+  } catch { /* sin conexión: se sigue usando la versión actual */ }
+}
+
 // ---------- Inicio ----------
 renderTodo();
+buscarVersionNueva();
 // Con una sesión guardada entra directo (también sin internet, con los datos de este dispositivo)
 if (conectado()) {
   desbloquear();

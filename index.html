@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Calculadora de impresión 3D</title>
   <meta name="description" content="Costos, presupuestos y catálogo de colores para impresión 3D">
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body class="bloqueado">
   <!-- Pantalla de ingreso: la contraseña es el token del Worker, que es lo que protege los datos -->
@@ -95,8 +95,13 @@
 
         <h2 class="sub">Cantidad y precio</h2>
         <div class="campos">
-          <label class="ancho">Cantidad
+          <label>Cantidad
             <input id="cantidad" type="number" min="1" step="1" value="1" inputmode="numeric">
+          </label>
+          <label>Ganancia (%)
+            <input id="ganancia" type="number" min="0" step="5" inputmode="decimal">
+            <small id="ayudaGanancia"></small>
+            <button type="button" id="restablecerGanancia" class="link" hidden>↺ Usar la de Configuración</button>
           </label>
           <label>Tu precio por unidad ($)
             <input id="precioManual" type="number" min="0" step="10" inputmode="decimal">
@@ -299,8 +304,9 @@
         <label>Margen por fallas (%)
           <input data-config="fallasPct" type="number" min="0" step="1">
         </label>
-        <label>Ganancia (%)
+        <label>Ganancia por defecto (%)
           <input data-config="gananciaPct" type="number" min="0" step="1">
+          <small>Cada pedido la puede cambiar: más alta para piezas chicas, más baja para las grandes.</small>
         </label>
         <label>Redondear precios a múltiplos de ($)
           <input data-config="redondeo" type="number" min="0" step="10">
@@ -352,6 +358,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

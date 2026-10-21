@@ -372,7 +372,8 @@ function calcular(cfg, t) {
 
   // 1) Ganancia sobre el costo de producción. El diseño no lleva ganancia extra:
   //    se cobra a tu tarifa por hora, que ya es tu pago por ese tiempo.
-  const gananciaPlaneada = produccion * cfg.gananciaPct / 100;
+  const gananciaPct = Math.max(0, t.ganancia ?? cfg.gananciaPct); // la del pedido, o la de Configuración
+  const gananciaPlaneada = produccion * gananciaPct / 100;
   const precioProduccion = produccion + gananciaPlaneada;
   // 2) Precio por unidad: automático (redondeado hacia arriba) o el que escribas a mano
   const sugeridoUnidad = roundUp(precioProduccion / cantidad, cfg.redondeo);
@@ -407,13 +408,13 @@ function calcular(cfg, t) {
     ],
     pasos: [
       { nombre: 'Costo de producción', valor: produccion, detalle: 'Material + electricidad + amortización + mantenimiento + fallas + insumos', clase: 'subtotal' },
-      { nombre: `+ Ganancia (${cfg.gananciaPct}%)`, valor: gananciaPlaneada, detalle: `${money.format(produccion)} × ${cfg.gananciaPct}%` },
+      { nombre: `+ Ganancia (${gananciaPct}%)`, valor: gananciaPlaneada, detalle: `${money.format(produccion)} × ${gananciaPct}%${t.ganancia == null ? ' (la de Configuración)' : ' (de este pedido)'}` },
       { nombre: '= Precio de producción', valor: precioProduccion, detalle: cantidad === 1 ? 'Para 1 unidad' : `Para las ${cantidad} unidades`, clase: 'subtotal' },
       {
         nombre: 'Precio por unidad',
         valor: listaUnidad,
         detalle: t.precioManual != null
-          ? `Tu precio. El mínimo recomendado (costo + ${cfg.gananciaPct}%) es ${money.format(sugeridoUnidad)}`
+          ? `Tu precio. El mínimo recomendado (costo + ${gananciaPct}%) es ${money.format(sugeridoUnidad)}`
           : `Mínimo recomendado: ${money.format(precioProduccion)} ÷ ${cantidad} u. = ${money.format(precioProduccion / cantidad)}${cfg.redondeo > 0 ? `, redondeado hacia arriba a múltiplos de ${money.format(cfg.redondeo)}` : ''}`,
         clase: t.precioManual != null ? 'manual' : '',
       },
@@ -434,6 +435,7 @@ function calcular(cfg, t) {
     diseno,
     disenoCobrado,
     costoTotal,
+    gananciaPct,
     gananciaPlaneada,
     precioProduccion,
     sugeridoUnidad,
@@ -451,7 +453,7 @@ function calcular(cfg, t) {
 
 // ---------- Formulario de trabajo ----------
 const CAMPOS_TRABAJO = ['nombre', 'concepto', 'cantidad', 'gramos', 'horas', 'minutos',
-  'horasDiseno', 'bonificarDiseno', 'otros', 'precioManual', 'descuento', 'notas'];
+  'horasDiseno', 'bonificarDiseno', 'otros', 'precioManual', 'descuento', 'ganancia', 'notas'];
 
 function leerTrabajo() {
   return {
@@ -470,6 +472,7 @@ function leerTrabajo() {
     // Solo cuentan como manuales si los editaste; si no, muestran el valor automático
     precioManual: $('#precioManual').dataset.manual ? numOrNull($('#precioManual').value) : null,
     descuento: $('#descuento').dataset.manual ? numOrNull($('#descuento').value) : null,
+    ganancia: $('#ganancia').dataset.manual ? numOrNull($('#ganancia').value) : null,
     notas: $('#notas').value.trim(),
   };
 }
@@ -490,6 +493,7 @@ function cargarTrabajo(t) {
   $('#esTanda').checked = !t.porUnidad;
   marcarManual($('#precioManual'), t.precioManual != null);
   marcarManual($('#descuento'), t.descuento != null);
+  marcarManual($('#ganancia'), t.ganancia != null);
   $('#filamento').value = t.filamentoId;
   renderSelectColores();
   $('#color').value = t.color ?? '';
@@ -561,9 +565,15 @@ function renderResultado() {
   const inputDescuento = $('#descuento');
   if (!inputPrecio.dataset.manual) inputPrecio.value = r.sugeridoUnidad;
   if (!inputDescuento.dataset.manual) inputDescuento.value = r.descuentoSugerido;
+  const inputGanancia = $('#ganancia');
+  if (!inputGanancia.dataset.manual) inputGanancia.value = config.gananciaPct;
+  $('#ayudaGanancia').textContent = inputGanancia.dataset.manual
+    ? `De este pedido. En Configuración: ${config.gananciaPct}%.`
+    : 'La de Configuración. Subila para piezas chicas.';
+  $('#restablecerGanancia').hidden = !inputGanancia.dataset.manual;
   $('#ayudaPrecio').textContent = inputPrecio.dataset.manual
-    ? `Mínimo recomendado: ${money.format(r.sugeridoUnidad)} (costo + ${config.gananciaPct}%).`
-    : `Es el mínimo recomendado (costo + ${config.gananciaPct}%). Escribí tu precio de venta si es mayor.`;
+    ? `Mínimo recomendado: ${money.format(r.sugeridoUnidad)} (costo + ${r.gananciaPct}%).`
+    : `Es el mínimo recomendado (costo + ${r.gananciaPct}%). Escribí tu precio de venta si es mayor.`;
   $('#ayudaDescuento').textContent = inputDescuento.dataset.manual
     ? `Editado a mano. Escala: ${r.descuentoSugerido}%.`
     : `Según la escala mayorista (${r.cantidad} u.).`;
@@ -1255,16 +1265,17 @@ document.querySelectorAll('.tab').forEach((tab) => {
 $('#trabajo').addEventListener('input', (e) => {
   if (e.target.id === 'filamento') renderSelectColores();
   // Escribir en precio o descuento los deja fijos; borrarlos vuelve al automático
-  if (e.target.id === 'precioManual' || e.target.id === 'descuento') marcarManual(e.target, e.target.value !== '');
+  if (['precioManual', 'descuento', 'ganancia'].includes(e.target.id)) marcarManual(e.target, e.target.value !== '');
   renderResultado();
 });
 $('#trabajo').addEventListener('reset', () => setTimeout(() => {
   marcarManual($('#precioManual'), false);
   marcarManual($('#descuento'), false);
+  marcarManual($('#ganancia'), false);
   renderSelectColores();
   renderResultado();
 }));
-for (const [boton, campo] of [['#restablecerPrecio', '#precioManual'], ['#restablecerDescuento', '#descuento']]) {
+for (const [boton, campo] of [['#restablecerPrecio', '#precioManual'], ['#restablecerDescuento', '#descuento'], ['#restablecerGanancia', '#ganancia']]) {
   $(boton).addEventListener('click', () => {
     marcarManual($(campo), false);
     renderResultado();

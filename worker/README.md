@@ -23,7 +23,7 @@ npx wrangler deploy
 En `secret put` pegá un token largo y aleatorio inventado por vos (no un token de la cuenta de Cloudflare). Para generar uno en PowerShell:
 
 ```powershell
--join ((48..57) + (65..90) + (97..122) | Get-Random -Count 40 | ForEach-Object { [char]$_ })
+$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b | ForEach-Object { $_.ToString('x2') })
 ```
 
 Por último, en la calculadora: **Configuración → Sincronización**, pegá la URL que mostró `wrangler deploy` y el token, y tocá **Conectar**. Hacelo una vez en la PC y otra en el celular.

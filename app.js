@@ -134,8 +134,9 @@ function saveConfig({ marcar = true } = {}) {
 
 let config = loadConfig();
 
-// ---------- Nube (Cloudflare Worker) ----------
-let conexion = leerJson(CONEXION_KEY, { apiUrl: '', apiToken: '' });
+// ---------- Nube (Cloudflare Worker) y sesión ----------
+const API_POR_DEFECTO = 'https://calculadora-3d-api.maxinunez434.workers.dev';
+let conexion = leerJson(CONEXION_KEY, { apiUrl: API_POR_DEFECTO, apiToken: '' });
 const conectado = () => Boolean(conexion.apiUrl && conexion.apiToken);
 
 async function api(metodo, ruta, cuerpo) {
@@ -148,8 +149,60 @@ async function api(metodo, ruta, cuerpo) {
     body: cuerpo ? JSON.stringify(cuerpo) : undefined,
   });
   const datos = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(datos.error || `Error ${resp.status}`);
+  if (!resp.ok) {
+    const error = new Error(datos.error || `Error ${resp.status}`);
+    error.status = resp.status;
+    // Si la contraseña cambió (por ejemplo, rotaste el token), se vuelve a pedir
+    if (resp.status === 401 && !document.body.classList.contains('bloqueado')) {
+      cerrarSesion('Tu contraseña cambió o ya no es válida. Ingresala de nuevo.');
+    }
+    throw error;
+  }
   return datos;
+}
+
+function mostrarBloqueo(mensaje = '') {
+  document.body.classList.add('bloqueado');
+  $('#ingresoError').textContent = mensaje;
+  $('#ingresoUrl').value = conexion.apiUrl || API_POR_DEFECTO;
+  setTimeout(() => $('#ingresoToken').focus());
+}
+
+function desbloquear() {
+  document.body.classList.remove('bloqueado');
+  $('#sesionUrl').textContent = conexion.apiUrl;
+}
+
+function cerrarSesion(mensaje = '') {
+  conexion = { apiUrl: conexion.apiUrl, apiToken: '' };
+  escribirJson(CONEXION_KEY, conexion);
+  marcarNube(null);
+  mostrarBloqueo(mensaje);
+}
+
+async function ingresar(e) {
+  e.preventDefault();
+  const anterior = conexion;
+  conexion = { apiUrl: $('#ingresoUrl').value.trim() || API_POR_DEFECTO, apiToken: $('#ingresoToken').value.trim() };
+  const boton = $('#botonIngreso');
+  boton.disabled = true;
+  $('#ingresoError').textContent = '';
+  try {
+    // Valida la contraseña y sube lo que se haya guardado en este navegador sin sesión
+    const remotos = new Set((await api('GET', '/evaluaciones')).map((ev) => ev.id));
+    const pendientes = leerJson(HISTORIAL_KEY, []).filter((ev) => !remotos.has(ev.id));
+    for (const ev of pendientes) await api('PUT', `/evaluaciones/${encodeURIComponent(ev.id)}`, ev);
+    escribirJson(CONEXION_KEY, conexion);
+    desbloquear();
+    await sincronizarInicio();
+  } catch (err) {
+    conexion = anterior;
+    $('#ingresoError').textContent = err.status === 401
+      ? 'Contraseña incorrecta.'
+      : `No se pudo conectar con el Worker: ${err.message}`;
+  } finally {
+    boton.disabled = false;
+  }
 }
 
 function marcarNube(estado, detalle = '') {
@@ -233,7 +286,7 @@ function recibirPrecios(datos, mensajeExtra = '') {
 function renderEstadoPrecios(cambiados = 0, extra = '') {
   const el = $('#estadoPrecios');
   if (!conectado() && !precios.actualizado) {
-    el.textContent = 'Conectá tu Worker en "Sincronización" para traer los precios de PrintALot.';
+    el.textContent = 'Iniciá sesión para traer los precios de PrintALot.';
     el.className = 'estado';
     return;
   }
@@ -313,41 +366,77 @@ function calcular(cfg, t) {
   const produccion = material + electricidad + amortizacion + mantenimiento + fallas + otros;
   const costoTotal = produccion + diseno;
 
-  const sugeridoUnidad = roundUp((produccion * (1 + cfg.gananciaPct / 100)) / cantidad, cfg.redondeo);
-  const descuentoSugerido = descuentoEscala(cfg, cantidad);
+  // 1) Ganancia sobre el costo de producción. El diseño no lleva ganancia extra:
+  //    se cobra a tu tarifa por hora, que ya es tu pago por ese tiempo.
+  const gananciaPlaneada = produccion * cfg.gananciaPct / 100;
+  const precioProduccion = produccion + gananciaPlaneada;
+  // 2) Precio por unidad: automático (redondeado hacia arriba) o el que escribas a mano
+  const sugeridoUnidad = roundUp(precioProduccion / cantidad, cfg.redondeo);
   const listaUnidad = t.precioManual ?? sugeridoUnidad;
-  const descuentoPct = Math.min(100, t.descuento ?? descuentoSugerido);
-  // Redondeo fino ($10) para que el redondeo general no se "coma" el descuento
-  const finalUnidad = Math.min(listaUnidad, roundUp(listaUnidad * (1 - descuentoPct / 100), 10));
-  const descuentoMonto = (listaUnidad - finalUnidad) * cantidad;
-  const total = finalUnidad * cantidad + disenoCobrado;
+  const subtotalPiezas = listaUnidad * cantidad;
+  // 3) Subtotal = piezas + diseño (si no está bonificado)
+  const subtotal = subtotalPiezas + disenoCobrado;
+  // 4) Descuento sobre el total; el resultado se redondea hacia arriba sin pasarse del subtotal
+  const descuentoSugerido = descuentoEscala(cfg, cantidad);
+  const descuentoPct = Math.min(100, Math.max(0, t.descuento ?? descuentoSugerido));
+  const total = descuentoPct > 0 ? Math.min(subtotal, roundUp(subtotal * (1 - descuentoPct / 100), cfg.redondeo)) : subtotal;
+  const descuentoMonto = subtotal - total;
   const ganancia = total - costoTotal;
 
   const kwh = kw * horas;
   const precioGramo = fil.pesoRollo > 0 ? fil.precioRollo / fil.pesoRollo : 0;
+  const hs = horas.toLocaleString('es-AR', { maximumFractionDigits: 2 });
 
   return {
     filamento: fil,
     horas,
     cantidad,
     lineas: [
-      { nombre: 'Material', valor: material, detalle: `${t.gramos} g × ${money.format(precioGramo)}/g`, fija: true },
-      { nombre: 'Electricidad', valor: electricidad, detalle: `${kwh.toFixed(2)} kWh × ${money.format(cfg.tarifaKwh)}`, fija: true },
-      { nombre: 'Amortización impresora', valor: amortizacion, detalle: `${horas.toFixed(2)} h × ${money.format(cfg.valorImpresora / (cfg.vidaUtilHoras || 1))}/h`, fija: true },
-      { nombre: 'Mantenimiento', valor: mantenimiento, detalle: `${horas.toFixed(2)} h × ${money.format(cfg.mantenimientoHora)}/h` },
-      { nombre: 'Margen por fallas', valor: fallas, detalle: `${cfg.fallasPct}% de material, luz, amortización y mantenimiento` },
-      { nombre: 'Otros insumos', valor: otros, detalle: '' },
-      { nombre: 'Diseño', valor: diseno, detalle: `${t.horasDiseno} h × ${money.format(cfg.tarifaDisenoHora)}/h${t.bonificarDiseno ? ' · bonificado' : ''}` },
+      { nombre: 'Material', valor: material, detalle: `${t.gramos} g × ${money.format(precioGramo)}/g (${money.format(fil.precioRollo)} el rollo de ${fil.pesoRollo} g)`, fija: true },
+      { nombre: 'Electricidad', valor: electricidad, detalle: `(${fil.consumoW} W impresora + ${cfg.consumoRaspberryW} W Raspberry) × ${hs} h = ${kwh.toFixed(2)} kWh × ${money.format(cfg.tarifaKwh)}/kWh`, fija: true },
+      { nombre: 'Amortización impresora', valor: amortizacion, detalle: `${money.format(cfg.valorImpresora)} ÷ ${cfg.vidaUtilHoras} h de vida útil = ${money.format(cfg.valorImpresora / (cfg.vidaUtilHoras || 1))}/h × ${hs} h`, fija: true },
+      { nombre: 'Mantenimiento', valor: mantenimiento, detalle: `${money.format(cfg.mantenimientoHora)}/h × ${hs} h` },
+      { nombre: 'Margen por fallas', valor: fallas, detalle: `${cfg.fallasPct}% de material + electricidad + amortización + mantenimiento` },
+      { nombre: 'Otros insumos', valor: otros, detalle: 'Argollas, imanes, packaging…' },
+      { nombre: 'Diseño (tu tiempo)', valor: diseno, detalle: `${t.horasDiseno} h × ${money.format(cfg.tarifaDisenoHora)}/h${t.bonificarDiseno ? ' · bonificado: no se cobra' : ''}` },
+    ],
+    pasos: [
+      { nombre: 'Costo de producción', valor: produccion, detalle: 'Material + electricidad + amortización + mantenimiento + fallas + insumos', clase: 'subtotal' },
+      { nombre: `+ Ganancia (${cfg.gananciaPct}%)`, valor: gananciaPlaneada, detalle: `${money.format(produccion)} × ${cfg.gananciaPct}%` },
+      { nombre: '= Precio de producción', valor: precioProduccion, detalle: `Para las ${cantidad} unidades`, clase: 'subtotal' },
+      {
+        nombre: 'Precio por unidad',
+        valor: listaUnidad,
+        detalle: t.precioManual != null
+          ? `Ajustado a mano. El sugerido es ${money.format(sugeridoUnidad)} (${money.format(precioProduccion)} ÷ ${cantidad})`
+          : `${money.format(precioProduccion)} ÷ ${cantidad} u. = ${money.format(precioProduccion / cantidad)}${cfg.redondeo > 0 ? `, redondeado hacia arriba a múltiplos de ${money.format(cfg.redondeo)}` : ''}`,
+        clase: t.precioManual != null ? 'manual' : '',
+      },
+      { nombre: `Piezas (${cantidad} × ${money.format(listaUnidad)})`, valor: subtotalPiezas, detalle: '' },
+      ...(diseno > 0 ? [{
+        nombre: '+ Diseño',
+        valor: disenoCobrado,
+        detalle: t.bonificarDiseno ? `Bonificado: vale ${money.format(diseno)} pero no se cobra` : `${t.horasDiseno} h × ${money.format(cfg.tarifaDisenoHora)}/h`,
+      }] : []),
+      { nombre: '= Subtotal', valor: subtotal, detalle: '', clase: 'subtotal' },
+      ...(descuentoPct > 0 ? [{
+        nombre: `− Descuento (${descuentoPct}%)`,
+        valor: -descuentoMonto,
+        detalle: `${descuentoPct}% sobre el subtotal de ${money.format(subtotal)}${t.descuento == null ? ', según la escala mayorista' : ', ajustado a mano'}${cfg.redondeo > 0 ? ` (total redondeado a múltiplos de ${money.format(cfg.redondeo)})` : ''}`,
+      }] : []),
     ],
     produccion,
     diseno,
     disenoCobrado,
     costoTotal,
+    gananciaPlaneada,
+    precioProduccion,
     sugeridoUnidad,
     descuentoSugerido,
     listaUnidad,
+    subtotalPiezas,
+    subtotal,
     descuentoPct,
-    finalUnidad,
     descuentoMonto,
     total,
     ganancia,
@@ -372,10 +461,17 @@ function leerTrabajo() {
     horasDiseno: num($('#horasDiseno').value),
     bonificarDiseno: $('#bonificarDiseno').checked,
     otros: num($('#otros').value),
-    precioManual: numOrNull($('#precioManual').value),
-    descuento: numOrNull($('#descuento').value),
+    // Solo cuentan como manuales si los editaste; si no, muestran el valor automático
+    precioManual: $('#precioManual').dataset.manual ? numOrNull($('#precioManual').value) : null,
+    descuento: $('#descuento').dataset.manual ? numOrNull($('#descuento').value) : null,
     notas: $('#notas').value.trim(),
   };
+}
+
+function marcarManual(input, manual) {
+  if (manual) input.dataset.manual = '1';
+  else delete input.dataset.manual;
+  input.closest('label').classList.toggle('editado', manual);
 }
 
 function cargarTrabajo(t) {
@@ -384,6 +480,8 @@ function cargarTrabajo(t) {
     if (el.type === 'checkbox') el.checked = Boolean(t[campo]);
     else el.value = t[campo] ?? '';
   }
+  marcarManual($('#precioManual'), t.precioManual != null);
+  marcarManual($('#descuento'), t.descuento != null);
   $('#filamento').value = t.filamentoId;
   renderSelectColores();
   $('#color').value = t.color ?? '';
@@ -422,20 +520,40 @@ function renderResultado() {
 
   const costos = $('#costos');
   costos.replaceChildren();
-  filaDl(costos, 'Costo total', money.format(r.costoTotal));
+  filaDl(costos, 'Costo de producción', money.format(r.produccion));
+  if (r.diseno > 0) filaDl(costos, 'Costo total (con tu hora de diseño)', money.format(r.costoTotal));
   if (r.cantidad > 1) filaDl(costos, 'Costo por unidad (sin diseño)', money.format(r.produccion / r.cantidad));
+
+  // Paso a paso del precio
+  $('#pasosPrecio').replaceChildren(...r.pasos.map((p) => {
+    const li = document.createElement('li');
+    if (p.clase) li.className = p.clase;
+    li.innerHTML = '<div class="linea"><span></span><strong></strong></div><div class="detalle"></div>';
+    li.querySelector('.linea span').textContent = p.nombre;
+    li.querySelector('.linea strong').textContent = p.valor < 0 ? `− ${money.format(-p.valor)}` : money.format(p.valor);
+    li.querySelector('.detalle').textContent = p.detalle;
+    return li;
+  }));
 
   const dlPrecio = $('#precios');
   dlPrecio.replaceChildren();
-  filaDl(dlPrecio, `Sugerido por unidad (costo + ${config.gananciaPct}%)`, money.format(r.sugeridoUnidad));
-  if (t.precioManual != null) filaDl(dlPrecio, 'Tu precio de lista por unidad', money.format(r.listaUnidad));
-  if (r.descuentoMonto > 0) {
-    filaDl(dlPrecio, `Descuento por cantidad (${r.descuentoPct}%)`, `− ${money.format(r.descuentoMonto)}`);
-    filaDl(dlPrecio, 'Precio final por unidad', money.format(r.finalUnidad));
-  }
-  if (r.diseno > 0) filaDl(dlPrecio, 'Diseño', t.bonificarDiseno ? 'Bonificado' : money.format(r.disenoCobrado));
   filaDl(dlPrecio, 'Total a cobrar', money.format(r.total), 'destacado');
-  filaDl(dlPrecio, 'Ganancia real', `${money.format(r.ganancia)} (${r.margenPct.toFixed(0)}%)`, r.ganancia >= 0 ? 'positivo' : 'negativo');
+  if (r.cantidad > 1) filaDl(dlPrecio, 'Equivale por unidad', money.format(r.total / r.cantidad));
+  filaDl(dlPrecio, 'Ganancia real (total − costo total)', `${money.format(r.ganancia)} (${r.margenPct.toFixed(0)}%)`, r.ganancia >= 0 ? 'positivo' : 'negativo');
+
+  // Campos de precio y descuento: muestran el valor automático hasta que los edites
+  const inputPrecio = $('#precioManual');
+  const inputDescuento = $('#descuento');
+  if (!inputPrecio.dataset.manual) inputPrecio.value = r.sugeridoUnidad;
+  if (!inputDescuento.dataset.manual) inputDescuento.value = r.descuentoSugerido;
+  $('#ayudaPrecio').textContent = inputPrecio.dataset.manual
+    ? `Editado a mano. Sugerido: ${money.format(r.sugeridoUnidad)}.`
+    : 'Calculado: costo + ganancia ÷ cantidad.';
+  $('#ayudaDescuento').textContent = inputDescuento.dataset.manual
+    ? `Editado a mano. Escala: ${r.descuentoSugerido}%.`
+    : `Según la escala mayorista (${r.cantidad} u.).`;
+  $('#restablecerPrecio').hidden = !inputPrecio.dataset.manual;
+  $('#restablecerDescuento').hidden = !inputDescuento.dataset.manual;
 
   const aviso = $('#aviso');
   aviso.hidden = r.ganancia >= 0 || r.total === 0;
@@ -445,9 +563,6 @@ function renderResultado() {
       ? `Cubrís los costos de producción, pero no tu hora de diseño (te faltan ${money.format(-r.ganancia)}). Vale la pena si esperás un pedido más grande.`
       : `Estás cobrando por debajo del costo de producción: perdés ${money.format(-sinDiseno)} sin contar el diseño.`;
   }
-
-  $('#precioManual').placeholder = `${r.sugeridoUnidad} (sugerido)`;
-  $('#descuento').placeholder = `${r.descuentoSugerido} (según escala)`;
 
   renderPresupuesto(t, r);
 }
@@ -1117,9 +1232,22 @@ document.querySelectorAll('.tab').forEach((tab) => {
 
 $('#trabajo').addEventListener('input', (e) => {
   if (e.target.id === 'filamento') renderSelectColores();
+  // Escribir en precio o descuento los deja fijos; borrarlos vuelve al automático
+  if (e.target.id === 'precioManual' || e.target.id === 'descuento') marcarManual(e.target, e.target.value !== '');
   renderResultado();
 });
-$('#trabajo').addEventListener('reset', () => setTimeout(() => { renderSelectColores(); renderResultado(); }));
+$('#trabajo').addEventListener('reset', () => setTimeout(() => {
+  marcarManual($('#precioManual'), false);
+  marcarManual($('#descuento'), false);
+  renderSelectColores();
+  renderResultado();
+}));
+for (const [boton, campo] of [['#restablecerPrecio', '#precioManual'], ['#restablecerDescuento', '#descuento']]) {
+  $(boton).addEventListener('click', () => {
+    marcarManual($(campo), false);
+    renderResultado();
+  });
+}
 
 document.querySelectorAll('[data-config]').forEach((input) => {
   input.addEventListener('input', () => {
@@ -1150,34 +1278,9 @@ $('#restaurar').addEventListener('click', () => {
   renderTodo();
 });
 
-$('#conectar').addEventListener('click', async () => {
-  const anterior = conexion;
-  conexion = { apiUrl: $('#apiUrl').value.trim(), apiToken: $('#apiToken').value.trim() };
-  if (!conectado()) { conexion = anterior; estadoConexion('Completá la URL y el token.', 'error'); return; }
-  estadoConexion('Conectando…');
-  try {
-    // Sube lo que se haya guardado en este navegador antes de conectar
-    const remotos = new Set((await api('GET', '/evaluaciones')).map((e) => e.id));
-    const pendientes = leerJson(HISTORIAL_KEY, []).filter((e) => !remotos.has(e.id));
-    for (const e of pendientes) await api('PUT', `/evaluaciones/${encodeURIComponent(e.id)}`, e);
-    escribirJson(CONEXION_KEY, conexion);
-    await sincronizarInicio();
-    if (pendientes.length) estadoConexion(`Conectado ✓ · se subieron ${pendientes.length} evaluaciones`, 'ok');
-  } catch (e) {
-    conexion = anterior;
-    estadoConexion(`No se pudo conectar: ${e.message}`, 'error');
-  }
-});
-
-$('#desconectar').addEventListener('click', () => {
-  conexion = { apiUrl: '', apiToken: '' };
-  escribirJson(CONEXION_KEY, conexion);
-  $('#apiUrl').value = '';
-  $('#apiToken').value = '';
-  marcarNube(null);
-  estadoConexion('Desconectado. Los datos siguen guardados en este navegador.');
-  renderEstadoPrecios();
-  renderHistorial();
+$('#formIngreso').addEventListener('submit', ingresar);
+$('#cerrarSesion').addEventListener('click', () => {
+  if (confirm('¿Cerrar sesión en este dispositivo? Vas a tener que volver a ingresar la contraseña.')) cerrarSesion();
 });
 
 $('#actualizarPrecios').addEventListener('click', actualizarPreciosAhora);
@@ -1187,7 +1290,11 @@ document.querySelectorAll('[data-exportar-pdf]').forEach((b) => b.addEventListen
 document.querySelectorAll('[data-exportar-jpg]').forEach((b) => b.addEventListener('click', () => exportarJpg(b.dataset.exportarJpg, b)));
 
 // ---------- Inicio ----------
-$('#apiUrl').value = conexion.apiUrl;
-$('#apiToken').value = conexion.apiToken;
 renderTodo();
-if (conectado()) sincronizarInicio(); else renderHistorial();
+// Con una sesión guardada entra directo (también sin internet, con los datos de este dispositivo)
+if (conectado()) {
+  desbloquear();
+  sincronizarInicio();
+} else {
+  mostrarBloqueo();
+}

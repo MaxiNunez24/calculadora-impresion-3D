@@ -5,9 +5,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Calculadora de impresión 3D</title>
   <meta name="description" content="Costos, presupuestos y catálogo de colores para impresión 3D">
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=5">
 </head>
-<body>
+<body class="bloqueado">
+  <!-- Pantalla de ingreso: la contraseña es el token del Worker, que es lo que protege los datos -->
+  <div id="bloqueo" class="bloqueo">
+    <form id="formIngreso" class="card ingreso">
+      <h1>Calculadora 3D</h1>
+      <p class="nota">Ingresá tu contraseña para entrar.</p>
+      <input class="solo-lectores" type="text" name="username" autocomplete="username" value="calculadora" tabindex="-1" aria-hidden="true">
+      <label>Contraseña
+        <input id="ingresoToken" name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <details>
+        <summary>Opciones avanzadas</summary>
+        <label>URL del Worker
+          <input id="ingresoUrl" type="url">
+        </label>
+      </details>
+      <button class="btn" id="botonIngreso">Entrar</button>
+      <p id="ingresoError" class="estado error"></p>
+    </form>
+  </div>
+
   <header class="app-header no-print">
     <div class="marca">
       <h1>Calculadora 3D</h1>
@@ -66,13 +86,16 @@
 
         <h2 class="sub">Precio</h2>
         <div class="campos">
-          <label>Precio de lista por unidad ($)
+          <label>Precio por unidad ($)
             <input id="precioManual" type="number" min="0" step="10" inputmode="decimal">
+            <small id="ayudaPrecio"></small>
+            <button type="button" id="restablecerPrecio" class="link" hidden>↺ Usar el sugerido</button>
           </label>
-          <label>Descuento por cantidad (%)
+          <label>Descuento sobre el total (%)
             <input id="descuento" type="number" min="0" max="100" step="1" inputmode="decimal">
+            <small id="ayudaDescuento"></small>
+            <button type="button" id="restablecerDescuento" class="link" hidden>↺ Usar la escala</button>
           </label>
-          <small class="ancho ayuda">Vacíos = precio sugerido y escala mayorista de Configuración.</small>
           <label class="ancho">Notas para el cliente
             <textarea id="notas" rows="2" placeholder="Ej: Incluye argolla metálica. Entrega en 5 días hábiles."></textarea>
           </label>
@@ -84,13 +107,22 @@
       </form>
 
       <div class="card resultado no-print">
-        <h2>Costos</h2>
+        <h2>1. Costos</h2>
         <ul id="desglose" class="desglose"></ul>
         <dl id="costos" class="totales"></dl>
-        <h2 class="sub">Precio</h2>
+        <h2 class="sub">2. Cómo se calcula el precio</h2>
+        <ul id="pasosPrecio" class="desglose pasos"></ul>
         <dl id="precios" class="totales"></dl>
         <p id="aviso" class="aviso" hidden></p>
-        <p class="nota">Tu hora de diseño cuenta como costo aunque la bonifiques: así ves la ganancia real.</p>
+        <details class="explicacion">
+          <summary>¿Por qué así?</summary>
+          <ul>
+            <li><strong>Ganancia:</strong> se aplica sobre el costo de producción (filamento, luz, desgaste de la impresora, mantenimiento, fallas e insumos), para que cada pieza deje plata además de recuperar lo invertido.</li>
+            <li><strong>Diseño:</strong> se suma aparte a tu tarifa por hora, sin ganancia extra, porque esa tarifa ya es tu pago por ese tiempo. Si lo bonificás, el cliente lo ve como regalo.</li>
+            <li><strong>Descuento:</strong> se aplica sobre el subtotal (piezas + diseño), con el porcentaje de la escala mayorista o el que pongas a mano.</li>
+            <li><strong>Ganancia real:</strong> lo que cobrás menos todos los costos, incluida tu hora de diseño aunque la regales. Es lo que de verdad te queda.</li>
+          </ul>
+        </details>
       </div>
 
       <div class="card col-presupuesto">
@@ -276,20 +308,13 @@
       </div>
 
       <div class="card">
-        <h2>Sincronización</h2>
-        <p class="nota">Con tu Worker de Cloudflare, la configuración y el historial se comparten entre la PC y el celular, y los precios se traen de PrintALot.</p>
-        <label>URL del Worker
-          <input id="apiUrl" type="url" placeholder="https://calculadora-3d-api.tu-usuario.workers.dev">
-        </label>
-        <label>Token
-          <input id="apiToken" type="password" autocomplete="off" placeholder="El mismo que cargaste con wrangler secret">
-          <small>Queda guardado solo en este dispositivo.</small>
-        </label>
-        <div class="acciones">
-          <button id="conectar" class="btn small">Conectar</button>
-          <button id="desconectar" class="btn small secondary">Desconectar</button>
-        </div>
+        <h2>Sesión</h2>
+        <p class="nota">La configuración, los colores y el historial se guardan en tu Worker de Cloudflare y se comparten entre la PC y el celular.</p>
+        <p class="nota">Worker: <span id="sesionUrl"></span></p>
         <p id="estadoConexion" class="estado"></p>
+        <div class="acciones">
+          <button id="cerrarSesion" class="btn small secondary">Cerrar sesión en este dispositivo</button>
+        </div>
       </div>
 
       <div class="card ancho-total">
@@ -315,6 +340,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

@@ -61,6 +61,44 @@ function hexDeNombre(nombre) {
   return '#9e9e9e';
 }
 
+// Identifica un color dentro de un filamento: el mismo nombre puede repetirse en distintas marcas
+const claveColor = (c) => (c.marca ? `${c.nombre} · ${c.marca}` : c.nombre);
+
+// ---------- Nombres para un tono (escáner) ----------
+const PALETA = [
+  ['Negro', '#1a1a1a'], ['Gris oscuro', '#4a4a4a'], ['Gris', '#8a8a8a'], ['Gris claro', '#c4c4c4'], ['Blanco', '#f4f4f4'],
+  ['Beige', '#e8d9b5'], ['Piel', '#f1c8a5'], ['Marrón', '#6d4c33'], ['Chocolate', '#4e342e'], ['Bordó', '#7b1f2e'],
+  ['Rojo', '#d32f2f'], ['Rosa', '#f48fb1'], ['Fucsia', '#e91e8c'], ['Naranja', '#f57c00'], ['Amarillo', '#fdd835'],
+  ['Dorado', '#c9a227'], ['Verde lima', '#9ccc3c'], ['Verde', '#2e9d4a'], ['Verde oscuro', '#1b5e20'], ['Turquesa', '#26a69a'],
+  ['Celeste', '#4fc3f7'], ['Azul', '#1e5bd8'], ['Azul marino', '#1a237e'], ['Violeta', '#7b3fb5'], ['Lila', '#b39ddb'],
+];
+
+const hexARgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+const rgbAHex = (rgb) => '#' + rgb.map((v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, '0')).join('');
+
+function rgbALab([r, g, b]) {
+  const lin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const [R, G, B] = [lin(r), lin(g), lin(b)];
+  const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+  const x = f((R * 0.4124 + G * 0.3576 + B * 0.1805) / 0.95047);
+  const y = f(R * 0.2126 + G * 0.7152 + B * 0.0722);
+  const z = f((R * 0.0193 + G * 0.1192 + B * 0.9505) / 1.08883);
+  return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+}
+
+function distanciaColor(hexA, hexB) {
+  const a = rgbALab(hexARgb(hexA));
+  const b = rgbALab(hexARgb(hexB));
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
+function nombreDeHex(hex) {
+  return PALETA.reduce((mejor, [nombre, h]) => {
+    const d = distanciaColor(hex, h);
+    return d < mejor.d ? { nombre, d } : mejor;
+  }, { nombre: 'Color', d: Infinity }).nombre;
+}
+
 // ---------- Configuración ----------
 function migrarConfig(saved) {
   const cfg = { ...structuredClone(DEFAULTS), ...structuredClone(saved) };
@@ -154,6 +192,7 @@ async function sincronizarInicio() {
       await api('PUT', '/config', { datos: config, actualizado: config.actualizado });
     }
     recibirPrecios(await api('GET', '/precios'));
+    renderEditorColores(); // muestra los botones "Importar de PrintALot"
     marcarNube('ok');
     estadoConexion('Conectado ✓', 'ok');
   } catch (e) {
@@ -421,10 +460,10 @@ function crearMuestra(hex) {
   return s;
 }
 
-function crearChip(color, onBorrar) {
+function crearChip(color, onBorrar, conMarca = false) {
   const chip = document.createElement('span');
   chip.className = 'chip';
-  chip.append(crearMuestra(color.hex), color.nombre);
+  chip.append(crearMuestra(color.hex), conMarca ? claveColor(color) : color.nombre);
   if (onBorrar) {
     const x = document.createElement('button');
     x.type = 'button';
@@ -439,20 +478,99 @@ function crearChip(color, onBorrar) {
   return chip;
 }
 
+/** Agrega el color al filamento, o actualiza el tono si ya existía con ese nombre y marca. */
+function guardarColor(fil, color) {
+  const existente = fil.colores.find((c) => claveColor(c) === claveColor(color));
+  if (existente) existente.hex = color.hex;
+  else fil.colores.push(color);
+  return existente ? 'actualizado' : 'nuevo';
+}
+
 function renderSelectColores() {
   const select = $('#color');
   const actual = select.value;
   const fil = config.filamentos.find((f) => f.id === $('#filamento').value) || config.filamentos[0];
-  const opciones = [['', 'A elegir por el cliente'], ...fil.colores.map((c) => [c.nombre, c.nombre])];
+  const opciones = [['', 'A elegir por el cliente'], ...fil.colores.map((c) => [claveColor(c), claveColor(c)])];
   select.replaceChildren(...opciones.map(([valor, texto]) => new Option(texto, valor)));
-  if (fil.colores.some((c) => c.nombre === actual)) select.value = actual;
+  if (fil.colores.some((c) => claveColor(c) === actual)) select.value = actual;
+}
+
+function renderMarcas() {
+  const marcas = new Set(['PrintALot']);
+  config.filamentos.forEach((f) => f.colores.forEach((c) => c.marca && marcas.add(c.marca)));
+  $('#marcas').replaceChildren(...[...marcas].sort().map((m) => new Option(m)));
+}
+
+// Importación desde PrintALot: qué filamento tiene el panel abierto y qué colores trajo
+let importando = null;
+
+async function abrirImportacion(fil, boton) {
+  boton.disabled = true;
+  try {
+    const { colores } = await api('GET', `/colores/${fil.printalotId}`);
+    importando = { filamentoId: fil.id, colores };
+  } catch (e) {
+    alert(`No se pudieron traer los colores: ${e.message}`);
+  } finally {
+    boton.disabled = false;
+  }
+  renderEditorColores();
+}
+
+function panelImportacion(fil) {
+  const panel = document.createElement('form');
+  panel.className = 'importar';
+  const tengo = new Set(fil.colores.filter((c) => c.marca === 'PrintALot').map((c) => c.nombre));
+  const lista = document.createElement('div');
+  lista.className = 'importar-lista';
+  lista.append(...importando.colores.map((c) => {
+    const label = document.createElement('label');
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+    check.value = c.nombre;
+    check.checked = tengo.has(c.nombre);
+    label.append(check, crearMuestra(c.hex || hexDeNombre(c.nombre)), c.nombre);
+    return label;
+  }));
+  const ayuda = document.createElement('p');
+  ayuda.className = 'nota';
+  ayuda.textContent = 'Marcá los colores de PrintALot que tenés. Los que desmarques se quitan de tu catálogo.';
+  const acciones = document.createElement('div');
+  acciones.className = 'acciones';
+  acciones.innerHTML = '<button class="btn small">Guardar selección</button><button type="button" class="btn small secondary">Cancelar</button>';
+  acciones.querySelector('[type="button"]').addEventListener('click', () => { importando = null; renderEditorColores(); });
+  panel.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const elegidos = new Set([...lista.querySelectorAll('input:checked')].map((c) => c.value));
+    fil.colores = fil.colores.filter((c) => c.marca !== 'PrintALot' || elegidos.has(c.nombre));
+    for (const c of importando.colores) {
+      if (elegidos.has(c.nombre)) guardarColor(fil, { nombre: c.nombre, hex: c.hex || hexDeNombre(c.nombre), marca: 'PrintALot' });
+    }
+    importando = null;
+    saveConfig();
+    renderColores();
+  });
+  panel.append(ayuda, lista, acciones);
+  return panel;
 }
 
 function renderEditorColores() {
+  renderMarcas();
   $('#editorColores').replaceChildren(...config.filamentos.map((f) => {
     const bloque = document.createElement('div');
+    const cabecera = document.createElement('div');
+    cabecera.className = 'barra-titulo';
     const titulo = document.createElement('h3');
     titulo.textContent = f.nombre || '(sin nombre)';
+    cabecera.append(titulo);
+    if (f.printalotId && conectado() && importando?.filamentoId !== f.id) {
+      const importar = document.createElement('button');
+      importar.type = 'button';
+      importar.className = 'btn small secondary';
+      importar.textContent = 'Importar de PrintALot';
+      importar.addEventListener('click', () => abrirImportacion(f, importar));
+      cabecera.append(importar);
+    }
 
     const chips = document.createElement('div');
     chips.className = 'chips';
@@ -461,7 +579,7 @@ function renderEditorColores() {
         f.colores.splice(i, 1);
         saveConfig();
         renderColores();
-      })));
+      }, true)));
     } else {
       chips.innerHTML = '<span class="vacio">Sin colores cargados</span>';
     }
@@ -469,8 +587,12 @@ function renderEditorColores() {
     const form = document.createElement('form');
     form.className = 'nuevo-color';
     const nombre = document.createElement('input');
-    nombre.placeholder = 'Nuevo color, ej: Rojo';
+    nombre.placeholder = 'Nuevo color';
     nombre.setAttribute('aria-label', `Nuevo color de ${f.nombre}`);
+    const marca = document.createElement('input');
+    marca.placeholder = 'Marca';
+    marca.setAttribute('list', 'marcas');
+    marca.setAttribute('aria-label', 'Marca');
     const hex = document.createElement('input');
     hex.type = 'color';
     hex.value = '#9e9e9e';
@@ -485,13 +607,15 @@ function renderEditorColores() {
       e.preventDefault();
       const n = nombre.value.trim();
       if (!n) return;
-      f.colores.push({ nombre: n, hex: hex.value });
+      guardarColor(f, { nombre: n, hex: hex.value, ...(marca.value.trim() ? { marca: marca.value.trim() } : {}) });
       saveConfig();
       renderColores();
     });
-    form.append(nombre, hex, agregar);
+    form.append(nombre, marca, hex, agregar);
 
-    bloque.append(titulo, chips, form);
+    bloque.append(cabecera, chips);
+    if (importando?.filamentoId === f.id) bloque.append(panelImportacion(f));
+    bloque.append(form);
     return bloque;
   }));
 }
@@ -527,6 +651,159 @@ function renderColores() {
   renderResultado();
 }
 
+// ---------- Escáner de muestras (foto) ----------
+const escaner = { imagen: null, blanco: null, marcas: [], pendiente: null, ultimoMaterial: null, ultimaMarca: '' };
+
+function pasoEscaner(texto) { $('#pasoEscaner').textContent = texto; }
+
+function dibujarEscaner() {
+  const lienzo = $('#lienzoFoto');
+  const ctx = lienzo.getContext('2d');
+  ctx.drawImage(escaner.imagen, 0, 0, lienzo.width, lienzo.height);
+  const radio = Math.max(10, lienzo.width * 0.018);
+  ctx.lineWidth = Math.max(2, lienzo.width / 400);
+  ctx.font = `bold ${radio}px system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const m of escaner.marcas) {
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, radio, 0, Math.PI * 2);
+    ctx.fillStyle = m.hex || 'rgba(255,255,255,0.6)';
+    ctx.fill();
+    ctx.strokeStyle = '#fa6831';
+    ctx.stroke();
+    ctx.fillStyle = '#111';
+    if (m.etiqueta) ctx.fillText(m.etiqueta, m.x, m.y);
+  }
+}
+
+/** Mediana de una zona alrededor del toque: ignora el texto grabado, sombras y reflejos. */
+function muestrear(x, y) {
+  const lienzo = $('#lienzoFoto');
+  const ctx = lienzo.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(escaner.imagen, 0, 0, lienzo.width, lienzo.height); // sin marcas encima
+  const r = Math.max(4, Math.round(lienzo.width * 0.012));
+  const x0 = Math.max(0, Math.round(x - r));
+  const y0 = Math.max(0, Math.round(y - r));
+  const { data } = ctx.getImageData(x0, y0, Math.min(2 * r, lienzo.width - x0), Math.min(2 * r, lienzo.height - y0));
+  const canales = [[], [], []];
+  for (let i = 0; i < data.length; i += 4) for (let c = 0; c < 3; c++) canales[c].push(data[i + c]);
+  dibujarEscaner();
+  return canales.map((v) => v.sort((a, b) => a - b)[Math.floor(v.length / 2)]);
+}
+
+function corregirBlanco(rgb) {
+  if (!escaner.blanco) return rgb;
+  // La hoja debería verse blanca: se escala cada canal para que lo sea
+  return rgb.map((v, i) => (v * 245) / Math.max(1, escaner.blanco[i]));
+}
+
+async function cargarFoto(archivo) {
+  const url = URL.createObjectURL(archivo);
+  const img = new Image();
+  img.src = url;
+  try { await img.decode(); } catch { alert('No se pudo abrir la imagen.'); return; }
+  const escala = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+  const lienzo = $('#lienzoFoto');
+  lienzo.width = Math.round(img.naturalWidth * escala);
+  lienzo.height = Math.round(img.naturalHeight * escala);
+  Object.assign(escaner, { imagen: img, blanco: null, marcas: [], pendiente: null });
+  $('#escaner').hidden = false;
+  $('#confirmarColor').hidden = true;
+  dibujarEscaner();
+  pasoEscaner('Paso 1: tocá una parte de la hoja blanca.');
+  lienzo.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function tocarFoto(evento) {
+  if (!escaner.imagen || escaner.pendiente) return;
+  const lienzo = $('#lienzoFoto');
+  const rect = lienzo.getBoundingClientRect();
+  const x = ((evento.clientX - rect.left) / rect.width) * lienzo.width;
+  const y = ((evento.clientY - rect.top) / rect.height) * lienzo.height;
+  const rgb = muestrear(x, y);
+
+  if (!escaner.blanco) {
+    escaner.blanco = rgb;
+    escaner.marcas.push({ x, y, etiqueta: 'B' });
+    dibujarEscaner();
+    pasoEscaner('Paso 2: tocá el centro de cada muestra (en la parte lisa, sin texto).');
+    return;
+  }
+
+  const hex = rgbAHex(corregirBlanco(rgb));
+  escaner.pendiente = { x, y, hex };
+  escaner.marcas.push({ x, y, hex });
+  dibujarEscaner();
+
+  const material = $('#cMaterial');
+  material.replaceChildren(...config.filamentos.map((f) => new Option(f.nombre, f.id)));
+  material.value = escaner.ultimoMaterial || $('#filamento').value;
+  $('#cHex').value = hex;
+  $('#cNombre').value = nombreDeHex(hex);
+  $('#cMarca').value = escaner.ultimaMarca;
+  avisarParecido();
+  $('#confirmarColor').hidden = false;
+  pasoEscaner('Revisá los datos y guardá el color (podés ajustar el tono tocando el cuadrito).');
+  $('#confirmarColor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/** Avisa si ya existe un color muy parecido en ese material, para no cargarlo dos veces. */
+function avisarParecido() {
+  const fil = config.filamentos.find((f) => f.id === $('#cMaterial').value);
+  const hex = $('#cHex').value;
+  const parecido = fil?.colores
+    .map((c) => ({ c, d: distanciaColor(hex, c.hex) }))
+    .sort((a, b) => a.d - b.d)[0];
+  $('#cAviso').textContent = parecido && parecido.d < 12
+    ? `Se parece a "${claveColor(parecido.c)}", que ya tenés en ${fil.nombre}.`
+    : '';
+}
+
+function terminarConfirmacion(guardado) {
+  if (!guardado) escaner.marcas.pop();
+  escaner.pendiente = null;
+  $('#confirmarColor').hidden = true;
+  dibujarEscaner();
+  pasoEscaner('Tocá otra muestra, o "Terminar" cuando estén todas.');
+}
+
+$('#fotoMuestras').addEventListener('change', (e) => {
+  if (e.target.files[0]) cargarFoto(e.target.files[0]);
+  e.target.value = ''; // permite volver a elegir la misma foto
+});
+$('#lienzoFoto').addEventListener('click', tocarFoto);
+$('#cMaterial').addEventListener('change', avisarParecido);
+$('#cHex').addEventListener('input', avisarParecido);
+$('#confirmarColor').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const fil = config.filamentos.find((f) => f.id === $('#cMaterial').value);
+  const nombre = $('#cNombre').value.trim();
+  if (!fil || !nombre) return;
+  const marca = $('#cMarca').value.trim();
+  const color = { nombre, hex: $('#cHex').value, ...(marca ? { marca } : {}) };
+  guardarColor(fil, color);
+  saveConfig();
+  Object.assign(escaner, { ultimoMaterial: fil.id, ultimaMarca: marca });
+  const marcaFoto = escaner.marcas[escaner.marcas.length - 1];
+  marcaFoto.hex = color.hex;
+  marcaFoto.etiqueta = String(escaner.marcas.filter((m) => m.hex).length);
+  renderColores();
+  terminarConfirmacion(true);
+});
+$('#cDescartar').addEventListener('click', () => terminarConfirmacion(false));
+$('#recalibrar').addEventListener('click', () => {
+  if (escaner.pendiente) terminarConfirmacion(false);
+  escaner.blanco = null;
+  escaner.marcas = escaner.marcas.filter((m) => m.etiqueta !== 'B');
+  dibujarEscaner();
+  pasoEscaner('Tocá una parte de la hoja blanca.');
+});
+$('#cerrarEscaner').addEventListener('click', () => {
+  Object.assign(escaner, { imagen: null, blanco: null, marcas: [], pendiente: null });
+  $('#escaner').hidden = true;
+});
+
 // ---------- Presupuesto ----------
 function filaPresupuesto(concepto, cant, unit, subtotal, clase) {
   const tr = document.createElement('tr');
@@ -549,7 +826,9 @@ function renderPresupuesto(t, r) {
   $('#pFecha').textContent = new Date().toLocaleDateString('es-AR', { dateStyle: 'long' });
   $('#pCliente').textContent = t.nombre ? `Cliente: ${t.nombre}` : '';
 
-  const material = [r.filamento.nombre, t.color].filter(Boolean).join(' ');
+  // Al cliente se le muestra el nombre del color, no la marca
+  const color = r.filamento.colores.find((c) => claveColor(c) === t.color)?.nombre ?? t.color;
+  const material = [r.filamento.nombre, color].filter(Boolean).join(' ');
   const concepto = `${t.concepto || 'Pieza impresa en 3D'} (${material})`;
   const items = [filaPresupuesto(concepto, r.cantidad, money.format(r.listaUnidad), money.format(r.listaUnidad * r.cantidad))];
 

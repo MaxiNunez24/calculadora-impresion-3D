@@ -198,8 +198,26 @@ table.editable input, table.editable select { margin: 0; }
 .chips .vacio { color: var(--muted); font-size: 0.85rem; }
 .editor-colores > div { padding: 0.75rem 0; border-top: 1px solid var(--border); }
 .editor-colores h3 { font-size: 0.95rem; }
-.nuevo-color { display: grid; grid-template-columns: 1fr 3rem auto; gap: 0.4rem; align-items: center; }
+.nuevo-color { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 2.6rem auto; gap: 0.4rem; align-items: center; }
 .nuevo-color input { margin: 0; }
+.editor-colores .barra-titulo { margin-bottom: 0.25rem; }
+
+/* Importar de PrintALot */
+.importar { border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; margin: 0.5rem 0; }
+.importar .nota { margin-bottom: 0.5rem; }
+.importar-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: 0.35rem 0.75rem; max-height: 16rem; overflow-y: auto; }
+.importar-lista label { display: flex; align-items: center; gap: 0.4rem; margin: 0; cursor: pointer; }
+.importar-lista input { width: auto; margin: 0; }
+.importar .acciones { margin-top: 0.75rem; }
+
+/* Escáner de muestras */
+.boton-archivo { display: inline-block; margin: 0; }
+.escaner { margin-top: 0.75rem; }
+.escaner canvas { display: block; width: 100%; height: auto; border-radius: 8px; margin: 0.5rem 0; cursor: crosshair; touch-action: manipulation; }
+.confirmar-color { display: grid; grid-template-columns: 3.5rem 1fr; gap: 0 0.75rem; align-items: start; border: 1px solid var(--accent); border-radius: 8px; padding: 0.75rem; }
+.confirmar-color #cHex { height: 3.5rem; margin: 0; }
+.confirmar-color .estado, .confirmar-color .acciones { grid-column: 1 / -1; }
+.confirmar-color .acciones { margin-top: 0.25rem; }
 
 /* ---------- Historial ---------- */
 .historial { list-style: none; padding: 0; margin: 0; }

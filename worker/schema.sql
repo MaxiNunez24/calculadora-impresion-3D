@@ -23,3 +23,10 @@ CREATE TABLE IF NOT EXISTS precios (
   url         TEXT,
   actualizado TEXT NOT NULL
 );
+
+-- Colores (nombre y tono) de cada producto de PrintALot, se refrescan cada 7 días
+CREATE TABLE IF NOT EXISTS colores_printalot (
+  producto_id INTEGER PRIMARY KEY,
+  datos       TEXT NOT NULL,          -- JSON: [{ nombre, slug, hex }]
+  actualizado TEXT NOT NULL
+);

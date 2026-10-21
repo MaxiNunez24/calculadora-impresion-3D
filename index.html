@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Calculadora de impresión 3D</title>
   <meta name="description" content="Costos, presupuestos y catálogo de colores para impresión 3D">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <header class="app-header no-print">
@@ -132,11 +132,42 @@
     </section>
 
     <!-- ============ CATÁLOGO ============ -->
-    <section id="catalogo" class="panel no-print-panel">
+    <section id="catalogo" class="panel">
       <div class="card no-print">
         <h2>Colores por filamento</h2>
-        <p class="nota">Cargá los colores que tenés en stock. Se usan en el selector de color, en el presupuesto y en el catálogo para clientes.</p>
+        <p class="nota">Cargá los colores que tenés en stock: a mano, importándolos de PrintALot o escaneando una foto de tus muestras. Se usan en el selector de color, en el presupuesto y en el catálogo.</p>
         <div id="editorColores" class="editor-colores"></div>
+        <datalist id="marcas"></datalist>
+      </div>
+
+      <div class="card no-print">
+        <h2>Escanear muestras</h2>
+        <p class="nota">Sacá una foto de tus muestras sobre una hoja blanca, con luz pareja y sin flash. Tocá primero la hoja (calibra la luz) y después cada muestra.</p>
+        <label class="btn secondary small boton-archivo">
+          📷 Sacar o elegir foto
+          <input id="fotoMuestras" type="file" accept="image/*" hidden>
+        </label>
+        <div id="escaner" class="escaner" hidden>
+          <p id="pasoEscaner" class="estado"></p>
+          <canvas id="lienzoFoto"></canvas>
+          <form id="confirmarColor" class="confirmar-color" hidden>
+            <input id="cHex" type="color" aria-label="Tono detectado (podés ajustarlo)" title="Tono detectado: tocalo para ajustarlo">
+            <div class="campos">
+              <label>Material <select id="cMaterial"></select></label>
+              <label>Marca <input id="cMarca" list="marcas" placeholder="PrintALot, Grilon3…"></label>
+              <label class="ancho">Nombre del color <input id="cNombre" required></label>
+            </div>
+            <p id="cAviso" class="estado"></p>
+            <div class="acciones">
+              <button class="btn small">Guardar color</button>
+              <button type="button" id="cDescartar" class="btn small secondary">Descartar</button>
+            </div>
+          </form>
+          <div class="acciones">
+            <button type="button" id="recalibrar" class="btn small secondary">Volver a calibrar con la hoja</button>
+            <button type="button" id="cerrarEscaner" class="btn small secondary">Terminar</button>
+          </div>
+        </div>
       </div>
       <div class="card">
         <div class="barra-titulo no-print">
@@ -284,6 +315,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

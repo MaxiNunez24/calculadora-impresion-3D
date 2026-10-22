@@ -1,5 +1,5 @@
 /**
- * API de la calculadora 3D.
+ * API de la calculadora de impresiones.
  *
  *   GET    /config                 configuración compartida entre dispositivos
  *   PUT    /config

@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Calculadora de impresión 3D</title>
-  <meta name="description" content="Costos, presupuestos y catálogo de colores para impresión 3D">
-  <link rel="stylesheet" href="styles.css?v=10">
+  <title>Calculadora de impresiones</title>
+  <meta name="description" content="Costos, presupuestos, catálogo de colores y ventas de impresiones 3D y térmicas">
+  <link rel="stylesheet" href="styles.css?v=11">
 </head>
 <body class="bloqueado">
   <!-- Pantalla de ingreso: la contraseña es el token del Worker, que es lo que protege los datos -->
   <div id="bloqueo" class="bloqueo">
     <form id="formIngreso" class="card ingreso">
-      <h1>Calculadora 3D</h1>
+      <h1>Calculadora de impresiones</h1>
       <p class="nota">Ingresá tu contraseña para entrar.</p>
       <input class="solo-lectores" type="text" name="username" autocomplete="username" value="calculadora" tabindex="-1" aria-hidden="true">
       <label>Contraseña
@@ -30,8 +30,8 @@
 
   <header class="app-header no-print">
     <div class="marca">
-      <h1>Calculadora 3D</h1>
-      <p class="subtitle">Prusa MK3S+ · OctoPrint <span id="estadoNube" class="estado-nube" hidden></span></p>
+      <h1>Calculadora de impresiones</h1>
+      <p class="subtitle">Prusa MK3S+ · Térmica Q15 <span id="estadoNube" class="estado-nube" hidden></span></p>
     </div>
     <nav class="tabs" role="tablist">
       <button class="tab active" data-tab="calcular" role="tab">Calcular</button>
@@ -358,6 +358,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

@@ -30,3 +30,12 @@ CREATE TABLE IF NOT EXISTS colores_printalot (
   datos       TEXT NOT NULL,          -- JSON: [{ nombre, slug, hex }]
   actualizado TEXT NOT NULL
 );
+
+-- Impresora térmica: ventas, pruebas, compras y cambios de rollo (se guardan tal cual ocurrieron)
+CREATE TABLE IF NOT EXISTS movimientos (
+  id    TEXT PRIMARY KEY,
+  fecha TEXT NOT NULL,
+  tipo  TEXT NOT NULL,                -- venta | cambio_rollo | compra_rollos
+  datos TEXT NOT NULL                 -- JSON completo del movimiento
+);
+CREATE INDEX IF NOT EXISTS idx_movimientos_fecha ON movimientos (fecha);

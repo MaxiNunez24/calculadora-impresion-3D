@@ -14,7 +14,7 @@ const COLORES_CONOCIDOS = {
 };
 
 const DEFAULTS = {
-  version: 3,
+  version: 4,
   actualizado: null,
   nombreNegocio: '',
   contacto: '',
@@ -40,6 +40,21 @@ const DEFAULTS = {
     { id: 'silk', nombre: 'PLA Silk', printalotId: 37325, precioRollo: 21000, pesoRollo: 1000, consumoW: 80, colores: [] },
     { id: 'flex', nombre: 'PLA Flex', printalotId: 37328, precioRollo: 21000, pesoRollo: 1000, consumoW: 85, colores: [] },
   ],
+  // Impresora térmica (Q15)
+  termica: {
+    valorImpresora: 70000,
+    vidaUtilImpresiones: 4000,
+    papeles: [
+      { id: 'termico', nombre: 'Térmico 57 mm', precioRollo: 1000, largoRolloCm: 300 },
+      { id: 'adhesivo', nombre: 'Adhesivo 57 mm', precioRollo: 1000, largoRolloCm: 300 },
+    ],
+    // largoCm: papel que gasta cada impresión, con márgenes
+    productos: [
+      { id: 'simple', nombre: '1 impresión', impresiones: 1, precio: 100, largoCm: 10, papelId: 'termico' },
+      { id: 'promo2', nombre: '2 impresiones', impresiones: 2, precio: 150, largoCm: 10, papelId: 'termico' },
+      { id: 'sticker', nombre: 'Sticker', impresiones: 1, precio: 150, largoCm: 10, papelId: 'adhesivo' },
+    ],
+  },
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -117,6 +132,8 @@ function migrarConfig(saved) {
     f.colores ??= [];
     if (f.printalotId === undefined) f.printalotId = DEFAULTS.filamentos.find((d) => d.id === f.id)?.printalotId ?? null;
   }
+  // v4 agregó la impresora térmica
+  cfg.termica = { ...structuredClone(DEFAULTS.termica), ...(saved.termica ? structuredClone(saved.termica) : {}) };
   cfg.version = DEFAULTS.version;
   return cfg;
 }
@@ -254,6 +271,7 @@ async function sincronizarInicio() {
     estadoConexion(`Sin conexión con el Worker: ${e.message}`, 'error');
   } finally {
     renderHistorial();
+    if (typeof sincronizarTermica === 'function') sincronizarTermica(); // termica.js
   }
 }
 
@@ -1186,7 +1204,7 @@ function opcionesPrintalot(item) {
 function renderTabla(tbody, items, campos, { minimo = 0, onCambio }) {
   tbody.replaceChildren(...items.map((item, i) => {
     const tr = document.createElement('tr');
-    for (const { clave, tipo, placeholder, opciones } of campos) {
+    for (const { clave, tipo, placeholder, opciones, texto } of campos) {
       const td = document.createElement('td');
       let input;
       if (tipo === 'select') {
@@ -1194,7 +1212,7 @@ function renderTabla(tbody, items, campos, { minimo = 0, onCambio }) {
         input.append(...opciones(item).map(([v, t]) => new Option(t, v)));
         input.value = item[clave] ?? '';
         input.addEventListener('change', () => {
-          item[clave] = numOrNull(input.value);
+          item[clave] = texto ? input.value : numOrNull(input.value);
           onCambio(false, clave);
         });
       } else {
@@ -1259,6 +1277,7 @@ function renderTodo() {
   renderCatalogo();
   renderEstadoPrecios();
   renderResultado();
+  if (typeof renderTermica === 'function') renderTermica(true); // termica.js
 }
 
 // ---------- Eventos ----------

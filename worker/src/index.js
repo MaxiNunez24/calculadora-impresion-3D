@@ -6,7 +6,10 @@
  *   GET    /evaluaciones           historial
  *   PUT    /evaluaciones/:id
  *   DELETE /evaluaciones/:id
- *   GET    /precios                últimos precios guardados (no consulta PrintALot)
+ *   GET    /movimientos            ventas, pruebas y cambios de rollo de la impresora térmica
+ *   PUT    /movimientos/:id
+ *   DELETE /movimientos/:id
+ *   GET    /precios               últimos precios guardados (no consulta PrintALot)
  *   POST   /precios/actualizar     consulta PrintALot (como mucho cada 10 minutos)
  *   GET    /colores/:productoId    colores (nombre y tono) de un producto de PrintALot, guardados 7 días
  *
@@ -117,6 +120,24 @@ async function rutear(request, env) {
     }
     if (metodo === 'DELETE' && id) {
       await env.DB.prepare('DELETE FROM evaluaciones WHERE id = ?1').bind(id).run();
+      return { ok: true };
+    }
+  }
+
+  if (recurso === 'movimientos') {
+    if (metodo === 'GET' && !id) {
+      const { results } = await env.DB.prepare('SELECT datos FROM movimientos ORDER BY fecha DESC').all();
+      return results.map((r) => JSON.parse(r.datos));
+    }
+    if (metodo === 'PUT' && id) {
+      const movimiento = await leerJson(request);
+      if (movimiento.id !== id || !movimiento.fecha || !movimiento.tipo) throw new HttpError(400, 'Movimiento inválido');
+      await env.DB.prepare('INSERT OR REPLACE INTO movimientos (id, fecha, tipo, datos) VALUES (?1, ?2, ?3, ?4)')
+        .bind(id, movimiento.fecha, movimiento.tipo, JSON.stringify(movimiento)).run();
+      return { ok: true };
+    }
+    if (metodo === 'DELETE' && id) {
+      await env.DB.prepare('DELETE FROM movimientos WHERE id = ?1').bind(id).run();
       return { ok: true };
     }
   }

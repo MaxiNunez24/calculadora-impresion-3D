@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Calculadora de impresiones</title>
   <meta name="description" content="Costos, presupuestos, catálogo de colores y ventas de impresiones 3D y térmicas">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body class="bloqueado">
   <!-- Pantalla de ingreso: la contraseña es el token del Worker, que es lo que protege los datos -->
@@ -36,8 +36,9 @@
     <nav class="tabs" role="tablist">
       <button class="tab active" data-tab="calcular" role="tab">Calcular</button>
       <button class="tab" data-tab="catalogo" role="tab">Catálogo</button>
+      <button class="tab" data-tab="termica" role="tab">Térmica</button>
       <button class="tab" data-tab="historial" role="tab">Historial</button>
-      <button class="tab" data-tab="config" role="tab">Configuración</button>
+      <button class="tab" data-tab="config" role="tab">Ajustes</button>
     </nav>
   </header>
 
@@ -245,6 +246,55 @@
     </section>
 
     <!-- ============ HISTORIAL ============ -->
+    <!-- ============ IMPRESORA TÉRMICA ============ -->
+    <section id="termica" class="panel no-print">
+      <div class="card venta-rapida">
+        <div class="barra-titulo">
+          <h2>Venta rápida</h2>
+          <span id="tPendientes" class="estado"></span>
+        </div>
+        <div class="segmentado" role="radiogroup" aria-label="Forma de pago">
+          <label><input type="radio" name="metodoPago" value="efectivo" checked><span>💵 Efectivo</span></label>
+          <label><input type="radio" name="metodoPago" value="transferencia"><span>📲 Transferencia</span></label>
+        </div>
+        <div id="botonesVenta" class="botones-venta"></div>
+        <div id="botonesPrueba" class="acciones"></div>
+        <div id="toastVenta" class="toast" hidden>
+          <span id="toastTexto"></span>
+          <button type="button" class="link" id="deshacerVenta">Deshacer</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Hoy</h2>
+        <div id="resumenHoy" class="stats"></div>
+      </div>
+
+      <div class="card">
+        <h2>Papel</h2>
+        <div id="estadoPapel" class="papeles"></div>
+      </div>
+
+      <div class="card">
+        <h2>Recupero de la impresora</h2>
+        <div id="recupero"></div>
+      </div>
+
+      <div class="card">
+        <h2>Costo por impresión</h2>
+        <div class="tabla-scroll"><table id="costosTermica" class="tabla-simple"></table></div>
+        <p class="nota" id="notaCostosTermica"></p>
+      </div>
+
+      <div class="card ancho-total">
+        <div class="barra-titulo">
+          <h2>Movimientos</h2>
+          <button id="exportarMovimientos" class="btn small secondary">Exportar CSV</button>
+        </div>
+        <ul id="listaMovimientos" class="historial"></ul>
+      </div>
+    </section>
+
     <section id="historial" class="panel no-print">
       <div class="card">
         <div class="barra-titulo">
@@ -355,9 +405,46 @@
           <button id="restaurar" class="btn small danger">Restaurar valores por defecto</button>
         </div>
       </div>
+      <div class="card">
+        <h2>Impresora térmica</h2>
+        <label>Valor de la impresora ($)
+          <input data-termica="valorImpresora" type="number" min="0" step="1000">
+          <small>Lo que costaría reemplazarla hoy.</small>
+        </label>
+        <label>Vida útil estimada (impresiones)
+          <input data-termica="vidaUtilImpresiones" type="number" min="1" step="100">
+          <small>Para repartir su valor entre las impresiones.</small>
+        </label>
+      </div>
+
+      <div class="card ancho-total">
+        <h2>Papeles de la térmica</h2>
+        <div class="tabla-scroll">
+          <table class="editable">
+            <thead><tr><th>Nombre</th><th>Precio del rollo ($)</th><th>Largo del rollo (cm)</th><th></th></tr></thead>
+            <tbody id="papelesBody"></tbody>
+          </table>
+        </div>
+        <div class="acciones">
+          <button id="agregarPapel" class="btn small secondary">+ Agregar papel</button>
+        </div>
+
+        <h2 class="sub">Productos de la térmica</h2>
+        <div class="tabla-scroll">
+          <table class="editable productos-termica">
+            <thead><tr><th>Nombre</th><th>Impresiones</th><th>Precio ($)</th><th>Papel por impresión (cm)</th><th>Papel</th><th></th></tr></thead>
+            <tbody id="productosBody"></tbody>
+          </table>
+        </div>
+        <small>"Papel por impresión" incluye los márgenes de arriba y abajo. Cada producto es un botón de "Venta rápida".</small>
+        <div class="acciones">
+          <button id="agregarProducto" class="btn small secondary">+ Agregar producto</button>
+        </div>
+      </div>
     </section>
   </main>
 
-  <script src="app.js?v=11"></script>
+  <script src="app.js?v=12"></script>
+  <script src="termica.js?v=12"></script>
 </body>
 </html>

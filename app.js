@@ -14,7 +14,7 @@ const COLORES_CONOCIDOS = {
 };
 
 const DEFAULTS = {
-  version: 4,
+  version: 5,
   actualizado: null,
   nombreNegocio: '',
   contacto: '',
@@ -53,6 +53,7 @@ const DEFAULTS = {
       { id: 'simple', nombre: '1 impresión', impresiones: 1, precio: 100, largoCm: 10, papelId: 'termico' },
       { id: 'promo2', nombre: '2 impresiones', impresiones: 2, precio: 150, largoCm: 10, papelId: 'termico' },
       { id: 'sticker', nombre: 'Sticker', impresiones: 1, precio: 150, largoCm: 10, papelId: 'adhesivo' },
+      { id: 'sticker2', nombre: '2 stickers', impresiones: 2, precio: 200, largoCm: 10, papelId: 'adhesivo' },
     ],
   },
 };
@@ -134,6 +135,10 @@ function migrarConfig(saved) {
   }
   // v4 agregó la impresora térmica
   cfg.termica = { ...structuredClone(DEFAULTS.termica), ...(saved.termica ? structuredClone(saved.termica) : {}) };
+  // v5 agregó la promo de 2 stickers (solo si no estaba, para no pisar lo que ya editaste)
+  if ((saved.version || 1) < 5 && !cfg.termica.productos.some((x) => x.id === 'sticker2')) {
+    cfg.termica.productos.push(structuredClone(DEFAULTS.termica.productos.find((x) => x.id === 'sticker2')));
+  }
   cfg.version = DEFAULTS.version;
   return cfg;
 }

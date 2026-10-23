@@ -8,6 +8,9 @@ const MOVIMIENTOS_KEY = 'calc3d.movimientos.v1';
 let movimientos = leerJson(MOVIMIENTOS_KEY, []);
 const guardarMovimientos = () => escribirJson(MOVIMIENTOS_KEY, movimientos);
 const activos = () => movimientos.filter((m) => !m.borrado);
+// Los "otros gastos" de Finanzas viajan en la misma cola, pero no son de la térmica
+const deLaTermica = () => activos().filter((m) => m.tipo !== 'gasto');
+const gastosDe = (area) => sumar(activos().filter((m) => m.tipo === 'gasto' && m.area === area), (m) => m.monto);
 const nuevoId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 const esHoy = (iso) => new Date(iso).toDateString() === new Date().toDateString();
 const sumar = (lista, f) => lista.reduce((s, x) => s + f(x), 0);
@@ -214,9 +217,11 @@ function renderPapel() {
 
 function renderRecupero() {
   const r = resumen(activos());
+  const otrosGastos = gastosDe('termica');
+  const recuperado = r.ganancia - otrosGastos;
   const valor = term().valorImpresora;
-  const pct = valor > 0 ? Math.min(100, (r.ganancia / valor) * 100) : 0;
-  const falta = Math.max(0, valor - r.ganancia);
+  const pct = valor > 0 ? Math.max(0, Math.min(100, (recuperado / valor) * 100)) : 0;
+  const falta = Math.max(0, valor - recuperado);
   // Ganancia promedio por impresión: la real si ya hay ventas; si no, la del primer producto
   const primero = term().productos[0];
   const promedio = r.impresiones > 0
@@ -227,13 +232,14 @@ function renderRecupero() {
     <div class="linea"><strong></strong><span></span></div>
     <div class="barra progreso"><span style="width:${pct.toFixed(1)}%"></span></div>
     <p class="nota"></p>`;
-  cont.querySelector('.linea strong').textContent = `${money.format(r.ganancia)} de ${money.format(valor)}`;
+  cont.querySelector('.linea strong').textContent = `${money.format(recuperado)} de ${money.format(valor)}`;
   cont.querySelector('.linea span').textContent = `${pct.toFixed(0)}%`;
   cont.querySelector('.nota').textContent = falta === 0
     ? '🎉 ¡La impresora ya está recuperada!'
     : `Faltan ${money.format(falta)}: ≈ ${promedio > 0 ? Math.ceil(falta / promedio) : '—'} impresiones más, ` +
       `a ${money.format(promedio)} de ganancia promedio cada una. ` +
-      `Llevás ${r.impresiones} impresiones vendidas en total.`;
+      `Llevás ${r.impresiones} impresiones vendidas en total` +
+      (otrosGastos ? ` y ${money.format(otrosGastos)} de otros gastos de la térmica.` : '.');
 }
 
 function renderCostos() {
@@ -260,7 +266,7 @@ function describir(m) {
 }
 
 function renderMovimientos() {
-  const lista = activos().sort((a, b) => b.fecha.localeCompare(a.fecha)).slice(0, 60);
+  const lista = deLaTermica().sort((a, b) => b.fecha.localeCompare(a.fecha)).slice(0, 60);
   const ul = $('#listaMovimientos');
   if (!lista.length) {
     ul.innerHTML = '<li class="vacio">Todavía no hay movimientos.</li>';
@@ -311,6 +317,7 @@ function renderTermica(completo = false) {
   renderRecupero();
   renderCostos();
   renderMovimientos();
+  if (typeof renderFinanzas === 'function') renderFinanzas(); // finanzas.js
 }
 
 function exportarMovimientos() {
@@ -318,7 +325,7 @@ function exportarMovimientos() {
   const tipos = { venta: 'Venta', cambio_rollo: 'Cambio de rollo', compra_rollos: 'Compra de rollos' };
   const filas = [
     ['Fecha', 'Hora', 'Tipo', 'Detalle', 'Impresiones', 'Cobrado', 'Pago', 'Papel', 'Cm de papel', 'Costo papel', 'Amortización'],
-    ...activos().sort((a, b) => a.fecha.localeCompare(b.fecha)).map((m) => {
+    ...deLaTermica().sort((a, b) => a.fecha.localeCompare(b.fecha)).map((m) => {
       const f = new Date(m.fecha);
       return [
         f.toLocaleDateString('es-AR'), f.toLocaleTimeString('es-AR', { timeStyle: 'short' }),

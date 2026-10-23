@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Calculadora de impresiones</title>
   <meta name="description" content="Costos, presupuestos, catálogo de colores y ventas de impresiones 3D y térmicas">
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=14">
 </head>
 <body class="bloqueado">
   <!-- Pantalla de ingreso: la contraseña es el token del Worker, que es lo que protege los datos -->
@@ -37,7 +37,7 @@
       <button class="tab active" data-tab="calcular" role="tab">Calcular</button>
       <button class="tab" data-tab="catalogo" role="tab">Catálogo</button>
       <button class="tab" data-tab="termica" role="tab">Térmica</button>
-      <button class="tab" data-tab="historial" role="tab">Historial</button>
+      <button class="tab" data-tab="finanzas" role="tab">Finanzas</button>
       <button class="tab" data-tab="config" role="tab">Ajustes</button>
     </nav>
   </header>
@@ -295,14 +295,61 @@
       </div>
     </section>
 
-    <section id="historial" class="panel no-print">
-      <div class="card">
+    <!-- ============ FINANZAS ============ -->
+    <section id="finanzas" class="panel no-print">
+      <div class="card ancho-total">
         <div class="barra-titulo">
-          <h2>Evaluaciones guardadas</h2>
-          <button id="exportarCsv" class="btn small secondary">Exportar CSV</button>
+          <h2>Resumen</h2>
+          <div class="segmentado periodo" role="radiogroup" aria-label="Período">
+            <label><input type="radio" name="periodo" value="mes" checked><span>Este mes</span></label>
+            <label><input type="radio" name="periodo" value="anterior"><span>Mes pasado</span></label>
+            <label><input type="radio" name="periodo" value="todo"><span>Todo</span></label>
+          </div>
         </div>
-        <p class="nota" id="notaHistorial"></p>
-        <ul id="listaHistorial" class="historial"></ul>
+        <div class="tabla-scroll"><table id="tablaFinanzas" class="tabla-simple tabla-finanzas"></table></div>
+        <p class="nota" id="notaFinanzas"></p>
+      </div>
+
+      <div class="card">
+        <h2>Recupero de los equipos</h2>
+        <div id="recuperoEquipos" class="papeles"></div>
+      </div>
+
+      <div class="card">
+        <h2>Pendientes</h2>
+        <div id="pendientes"></div>
+      </div>
+
+      <div class="card ancho-total">
+        <div class="barra-titulo">
+          <h2>Presupuestos 3D</h2>
+          <div class="acciones">
+            <select id="filtroEstado" aria-label="Filtrar por estado">
+              <option value="">Todos</option>
+              <option value="presupuestado">📝 Presupuestados</option>
+              <option value="aceptado">🛠️ Aceptados</option>
+              <option value="cobrado">💰 Cobrados</option>
+              <option value="rechazado">❌ Rechazados</option>
+            </select>
+            <button id="exportarCsv" class="btn small secondary">Exportar CSV</button>
+          </div>
+        </div>
+        <p class="nota" id="notaHistorial">Tocá "Gestionar" para pasar un presupuesto a aceptado (con seña y fecha de entrega) o a cobrado.</p>
+        <ul id="listaHistorial" class="historial presupuestos"></ul>
+      </div>
+
+      <div class="card ancho-total">
+        <h2>Otros gastos</h2>
+        <p class="nota">Lo que no sale de ningún cálculo: repuestos, herramientas, packaging, la expo, publicidad… La compra de filamento y de rollos no va acá: ya se descuenta por lo que gasta cada trabajo.</p>
+        <form id="formGasto" class="form-gasto">
+          <label>Fecha <input id="gFecha" type="date" required></label>
+          <label class="concepto">Concepto <input id="gConcepto" type="text" placeholder="Ej: Pico 0,4 mm" required></label>
+          <label>Monto ($) <input id="gMonto" type="number" min="1" step="1" required inputmode="decimal"></label>
+          <label>De <select id="gArea"><option value="3d">Impresora 3D</option><option value="termica">Térmica</option><option value="general">General</option></select></label>
+          <label>Categoría <select id="gCategoria"><option>Repuestos</option><option>Herramientas</option><option>Packaging</option><option>Expo / viáticos</option><option>Publicidad</option><option>Otros</option></select></label>
+          <button class="btn small">Agregar gasto</button>
+        </form>
+        <ul id="listaGastos" class="historial"></ul>
       </div>
     </section>
 
@@ -318,6 +365,10 @@
         </label>
         <label>Validez del presupuesto (días)
           <input data-config="validezDias" type="number" min="0" step="1">
+        </label>
+        <label>Seña sugerida (%)
+          <input data-config="senaPct" type="number" min="0" max="100" step="5">
+          <small>Al aceptar un presupuesto se propone esta seña.</small>
         </label>
       </div>
 
@@ -444,7 +495,8 @@
     </section>
   </main>
 
-  <script src="app.js?v=13"></script>
-  <script src="termica.js?v=13"></script>
+  <script src="app.js?v=14"></script>
+  <script src="termica.js?v=14"></script>
+  <script src="finanzas.js?v=14"></script>
 </body>
 </html>

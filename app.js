@@ -19,6 +19,7 @@ const DEFAULTS = {
   nombreNegocio: '',
   contacto: '',
   validezDias: 7,
+  senaPct: 50,
   valorImpresora: 500000,
   vidaUtilHoras: 5000,
   mantenimientoHora: 15,
@@ -355,6 +356,10 @@ const historial = {
     escribirJson(HISTORIAL_KEY, [entrada, ...leerJson(HISTORIAL_KEY, [])]);
     if (conectado()) await api('PUT', `/evaluaciones/${encodeURIComponent(entrada.id)}`, entrada);
   },
+  async actualizar(entrada) {
+    escribirJson(HISTORIAL_KEY, leerJson(HISTORIAL_KEY, []).map((e) => (e.id === entrada.id ? entrada : e)));
+    if (conectado()) await api('PUT', `/evaluaciones/${encodeURIComponent(entrada.id)}`, entrada);
+  },
   async borrar(id) {
     escribirJson(HISTORIAL_KEY, leerJson(HISTORIAL_KEY, []).filter((e) => e.id !== id));
     if (conectado()) await api('DELETE', `/evaluaciones/${encodeURIComponent(id)}`);
@@ -454,6 +459,7 @@ function calcular(cfg, t) {
         detalle: `${descuentoPct}% sobre el subtotal de ${money.format(subtotal)}${t.descuento == null ? ', según la escala mayorista' : ', ajustado a mano'}${cfg.redondeo > 0 ? ` (total redondeado a múltiplos de ${money.format(cfg.redondeo)})` : ''}`,
       }] : []),
     ],
+    costos: { material, electricidad, amortizacion, mantenimiento, fallas, otros },
     produccion,
     diseno,
     disenoCobrado,
@@ -1085,42 +1091,12 @@ function exportarPdf(id) {
 window.addEventListener('afterprint', () => { delete document.body.dataset.imprimir; });
 
 // ---------- Historial (UI) ----------
+// Presupuestos guardados; finanzas.js los dibuja junto con el resumen de ganancias.
+let evaluaciones = [];
+
 async function renderHistorial() {
-  $('#notaHistorial').textContent = conectado()
-    ? 'Guardado en tu Worker de Cloudflare: lo ves igual en la PC y en el celular. Al cargar una evaluación se recalcula con la configuración actual.'
-    : 'Guardado solo en este navegador. Conectá tu Worker en Configuración para verlo también en el celular.';
-  const lista = await historial.listar();
-  const ul = $('#listaHistorial');
-  if (!lista.length) {
-    const li = document.createElement('li');
-    li.className = 'vacio';
-    li.textContent = 'Todavía no guardaste ninguna evaluación.';
-    ul.replaceChildren(li);
-    return;
-  }
-  ul.replaceChildren(...lista.map((e) => {
-    const li = document.createElement('li');
-    li.innerHTML = `
-      <div class="info"><strong></strong><small></small></div>
-      <div class="acciones" style="margin:0">
-        <button class="btn small secondary" data-accion="cargar">Cargar</button>
-        <button class="icon-btn" data-accion="borrar" title="Borrar">✕</button>
-      </div>`;
-    li.querySelector('strong').textContent = `${e.trabajo.nombre || 'Sin cliente'} · ${e.trabajo.concepto || 'Pieza 3D'}`;
-    li.querySelector('small').textContent =
-      `${new Date(e.fecha).toLocaleDateString('es-AR')} · ${e.resumen.cantidad} u. de ${e.resumen.filamento} · ` +
-      `Total ${money.format(e.resumen.total)} · Ganancia ${money.format(e.resumen.ganancia)}`;
-    li.querySelector('[data-accion="cargar"]').addEventListener('click', () => {
-      cargarTrabajo(e.trabajo);
-      activarTab('calcular');
-    });
-    li.querySelector('[data-accion="borrar"]').addEventListener('click', async () => {
-      if (!confirm('¿Borrar esta evaluación?')) return;
-      try { await historial.borrar(e.id); } catch (err) { alert(`Se borró en este dispositivo, pero no en la nube: ${err.message}`); }
-      renderHistorial();
-    });
-    return li;
-  }));
+  evaluaciones = await historial.listar();
+  if (typeof renderFinanzas === 'function') renderFinanzas(); // finanzas.js
 }
 
 async function guardarEvaluacion() {
@@ -1132,6 +1108,7 @@ async function guardarEvaluacion() {
     await historial.guardar({
       id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
       fecha: new Date().toISOString(),
+      estado: 'presupuestado',
       trabajo: t,
       resumen: {
         filamento: r.filamento.nombre,
@@ -1158,7 +1135,8 @@ async function exportarCsv() {
   const celda = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const filas = [
     ['Fecha', 'Cliente', 'Concepto', 'Filamento', 'Color', 'Cantidad', 'Gramos (total)', 'Horas impresión (total)', 'Horas diseño',
-      'Diseño bonificado', 'Costo total', 'Total cobrado', 'Ganancia', 'Margen %'],
+      'Diseño bonificado', 'Costo total', 'Total presupuestado', 'Ganancia', 'Margen %',
+      'Estado', 'Entrega', 'Seña', 'Cobrado', 'Fecha de cobro', 'Forma de pago'],
     ...lista.map((e) => [
       new Date(e.fecha).toLocaleDateString('es-AR'),
       e.trabajo.nombre, e.trabajo.concepto, e.resumen.filamento, e.trabajo.color, e.resumen.cantidad,
@@ -1167,13 +1145,14 @@ async function exportarCsv() {
       decimal(+((e.trabajo.horas + e.trabajo.minutos / 60) * (e.trabajo.porUnidad ? e.trabajo.cantidad : 1)).toFixed(2)),
       decimal(e.trabajo.horasDiseno), e.trabajo.bonificarDiseno ? 'Sí' : 'No',
       e.resumen.costoTotal, e.resumen.total, e.resumen.ganancia, e.resumen.margenPct,
+      e.estado || 'presupuestado', e.entrega || '', e.sena?.monto ?? '', e.cobro?.monto ?? '', e.cobro?.fecha || '', e.cobro?.metodo || '',
     ]),
   ];
   // Punto y coma + BOM para que Excel en español lo abra bien
   const csv = '﻿' + filas.map((f) => f.map(celda).join(';')).join('\r\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  a.download = `historial-impresiones-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `presupuestos-3d-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
 }

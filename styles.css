@@ -354,3 +354,36 @@ body.bloqueado > .app-header, body.bloqueado > main { display: none; }
 .tabla-simple .positivo { color: var(--ok); font-weight: 600; }
 .tabla-simple .negativo { color: var(--danger); font-weight: 600; }
 table.editable.productos-termica { min-width: 640px; }
+
+/* ---------- Finanzas ---------- */
+.segmentado.periodo { grid-template-columns: repeat(3, 1fr); margin: 0; }
+.segmentado.periodo span { padding: 0.35rem 0.6rem; font-size: 0.85rem; }
+.tabla-finanzas td:first-child { min-width: 9rem; }
+.tabla-finanzas tr.ingresos td { font-weight: 600; }
+.tabla-finanzas tr.total td { font-weight: 700; font-size: 1rem; border-top: 2px solid var(--accent); color: var(--text); }
+.tabla-finanzas tr.total td:not(:first-child) { color: var(--ok); }
+.tabla-finanzas tr.detalle td { color: var(--muted); font-size: 0.8rem; border-bottom: 0; }
+.tabla-finanzas tr.total td.neg { color: var(--danger); }
+@media (max-width: 480px) {
+  .tabla-finanzas { font-size: 0.78rem; }
+  .tabla-finanzas td:first-child { min-width: 0; }
+  .tabla-finanzas th, .tabla-finanzas td { padding: 0.35rem 0.15rem; }
+  .tabla-finanzas tr.total td { font-size: 0.85rem; }
+}
+#pendientes .stat { margin-bottom: 0.75rem; }
+#pendientes .stat strong { color: var(--accent); }
+.pendientes-lista li.atrasado strong, .pendientes-lista li.atrasado small { color: var(--danger); }
+.presupuestos li { flex-wrap: wrap; }
+.presupuestos li .info { flex: 1 1 14rem; }
+.presupuestos .badge { font-size: 0.78rem; padding: 0.2rem 0.55rem; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); white-space: nowrap; }
+.presupuestos li.estado-aceptado .badge { border-color: var(--accent); color: var(--accent); }
+.presupuestos li.estado-cobrado .badge { border-color: var(--ok); color: var(--ok); }
+.presupuestos li.estado-rechazado { opacity: 0.6; }
+.gestionar { flex-basis: 100%; }
+.gestionar summary { cursor: pointer; color: var(--accent); font-size: 0.85rem; font-weight: 600; }
+.gestionar .gestion { margin-top: 0.6rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; }
+.gestionar .gestion .acciones { margin-top: 0; }
+.form-gasto { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0 0.75rem; align-items: end; }
+.form-gasto .concepto { grid-column: span 2; }
+.form-gasto .btn { margin-bottom: 0.75rem; }
+@media (max-width: 480px) { .form-gasto .concepto { grid-column: 1 / -1; } }
